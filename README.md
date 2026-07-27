@@ -32,6 +32,7 @@ The binary is `octupie-video-editor` (run `npm run build` first, or use `npm run
 | `render <plan.json>` | Render, assemble audio, mux, and QA a final master. |
 | `qa <master.mp4> --plan <plan.json>` | QA an existing master against a plan. |
 | `demo` | Generate and render a synthetic demo, then QA it. |
+| `agent <subcommand>` | Bounded agent: brief to validated plan, optional render, learning. |
 
 Example:
 
@@ -41,6 +42,49 @@ node dist/cli.js init --preset octupie-product-launch --out my-plan.json
 node dist/cli.js validate my-plan.json
 node dist/cli.js render my-plan.json
 ```
+
+## Agent (brief to validated plan)
+
+The agent turns a human brief into a validated edit plan, optionally renders it,
+and remembers explicit human corrections between runs. It runs standalone: with
+no model available, the built-in deterministic provider runs the whole loop
+offline; when a `claude` or `codex` CLI is logged in (or a standard API env var
+is set), the agent can use it. Models only ever propose data that is validated
+against the edit-plan schema; nothing a model returns is executed. Human QA of
+the delivered master is still required.
+
+The agent also checks the plan against the brief. It rejects invented media:
+source clips, B-roll, dialogue, music, and SFX must come from paths declared in
+the brief. Claude runs with tools and session persistence disabled. Codex runs
+inside a read-only sandbox.
+
+```bash
+# See which providers are available and authenticated
+npm run agent -- providers
+
+# Plan from a brief, offline, without rendering
+npm run agent -- run brief.json --provider deterministic --no-render
+
+# Save a human correction, scoped to this creator
+npm run agent -- feedback --run <runId> --scope creator --creator shivank --rule "No stock footage"
+
+# List and deactivate learned rules
+npm run agent -- rules
+npm run agent -- deactivate --rule <ruleId>
+```
+
+A brief is JSON validated by `src/agent/brief.ts` (AgentBrief v1): objective,
+audience, platform, creator/style, preset, desired duration, relative source
+clips, optional transcript text or path, output file, constraints, an optional
+hook-variant planning hint, and a learning scope. One run currently selects one
+final plan. Every path is a safe relative path.
+
+Run records and learned rules live under `OVE_AGENT_HOME` (default
+`~/.octupie-video-editor`), outside this repository. Each run writes an audit
+directory (sanitized brief, text asset manifest, prompts or prompt hashes,
+redacted model replies, validated plans and critiques per iteration, final plan,
+provider metadata, active rule ids, and any failure detail). See
+`AGENTIC_ARCHITECTURE.md` for the full design.
 
 ## Presets
 
@@ -77,6 +121,7 @@ Remotion reads footage and stills from this root. FFmpeg reads dialogue, music, 
 ## Documentation
 
 - `ARCHITECTURE.md`: the planner and renderer split, storage and job boundaries, security.
+- `AGENTIC_ARCHITECTURE.md`: the standalone bounded agent, providers, learning, and audit.
 - `PRODUCTIZATION.md`: integrating the engine into Octupie and Dowd.
 - `ASSET_POLICY.md`: media, licensing, and what stays out of Git.
 - `STYLE_LEARNING.md`: how learned editing rules become code, schema, and tests.

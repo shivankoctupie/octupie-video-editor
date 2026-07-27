@@ -9,6 +9,7 @@ import { binaryAvailable, ffmpegBinary, ffprobeBinary } from "./ffmpeg/spawn.js"
 import { runFinalMasterQa, writeQaReport } from "./ffmpeg/qa.js";
 import { renderPlan } from "./pipeline.js";
 import { runDemo } from "./demo/generate.js";
+import { runAgentCli } from "./agent/cli.js";
 
 interface Args {
   _: string[];
@@ -196,12 +197,18 @@ function usage(): void {
   log("  render <plan.json>     Render, assemble audio, mux, and QA a master.");
   log("  qa <master.mp4>        QA an existing master (--plan or explicit flags).");
   log("  demo                   Generate and render a synthetic demo, then QA it.");
+  log("  agent <subcommand>     Bounded agent: providers, run, feedback, rules, deactivate.");
   log("");
   log(`Presets: ${listPresets().map((p) => p.id).join(", ")}`);
 }
 
 export async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  const rawArgv = process.argv.slice(2);
+  // The agent layer owns its own subcommand parsing and exit codes.
+  if (rawArgv[0] === "agent") {
+    process.exit(await runAgentCli(rawArgv.slice(1)));
+  }
+  const args = parseArgs(rawArgv);
   const cmd = args._.shift();
   try {
     switch (cmd) {

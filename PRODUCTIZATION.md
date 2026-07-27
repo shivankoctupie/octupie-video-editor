@@ -25,6 +25,15 @@ user brief
 
 ## Planner integration
 
+The repository ships a reference planner: the bounded agent in `src/agent/`
+(see `AGENTIC_ARCHITECTURE.md`). It is standalone and zero-key by default. It
+turns an AgentBrief into a validated plan through a capped planner/reviewer loop,
+uses the deterministic offline provider or an existing Claude/Codex CLI login,
+and preserves a deterministic fallback so a run always yields a valid plan. A
+product can adopt it directly or replace it, as long as the plan still validates
+server-side before enqueuing. Its learning store and audit directories are file
+based under `OVE_AGENT_HOME`; a host service can point that at per-tenant storage.
+
 - The planner emits plans against `schema/edit-plan.schema.json`. Give the model the schema and the preset list; constrain its output to a validating plan.
 - Always run `parseEditPlan` server-side before enqueuing. A plan that fails validation is a planner bug, not a render job. Return the errors to the planner loop.
 - Presets carry the editorial identity. The planner selects a preset and fills scenes, captions, and SFX intent; it does not restate typography or color.
@@ -67,7 +76,8 @@ Dowd integrates the engine as a rendering and QA backend behind its own planner 
 
 ## What is intentionally excluded
 
-- No planner, model prompts, or model keys. The engine is zero-key by design.
+- No bundled model keys. The deterministic engine and offline agent provider
+  remain zero-key; authenticated providers are optional adapters.
 - No job queue, database, auth, or web server.
 - No bundled media, fonts as binaries, or paid asset packs.
 - No cloud storage client. The engine reads and writes the local filesystem only.
