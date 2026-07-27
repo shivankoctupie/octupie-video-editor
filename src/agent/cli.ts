@@ -27,6 +27,9 @@ import { enforceMaxSize, MAX_SIZES } from "./redact.js";
 import type { ClipProbe } from "./manifest.js";
 import { resolveExistingAssetPath } from "../util/assetRoot.js";
 import { probe as ffprobe, videoStream, audioStream } from "../ffmpeg/ffprobe.js";
+import { diagnoseCapabilities } from "../capabilities/registry.js";
+import { loadAcceptanceManifest } from "../capabilities/acceptance.js";
+import { PERMISSION_ACTIONS } from "../permissions/policy.js";
 
 export interface AgentCliDeps {
   log?: (s: string) => void;
@@ -84,6 +87,8 @@ export async function runAgentCli(argv: string[], deps: AgentCliDeps = {}): Prom
   switch (sub) {
     case "providers":
       return cmdProviders(deps, log);
+    case "capabilities":
+      return cmdCapabilities(flags, log);
     case "run":
       return cmdRun({ _, flags }, deps, home, log, errorLog);
     case "feedback":
@@ -110,6 +115,49 @@ async function cmdProviders(deps: AgentCliDeps, log: (s: string) => void): Promi
     const auth = d.authenticated === true ? "auth:yes" : d.authenticated === false ? "auth:no" : "auth:unknown";
     log(`  ${d.available ? "ok  " : "--  "} ${d.id.padEnd(14)} ${auth.padEnd(13)} ${d.detail}`);
   }
+  return 0;
+}
+
+/**
+ * `agent capabilities` reports the truthful state of the eight parity capabilities,
+ * the default-deny permission model, and the acceptance-gate ledger. It is fully
+ * offline and deterministic and never claims an unimplemented feature.
+ */
+async function cmdCapabilities(
+  flags: Record<string, string | boolean>,
+  log: (s: string) => void,
+): Promise<number> {
+  const diags = await diagnoseCapabilities();
+  const manifest = loadAcceptanceManifest();
+  const green = manifest.gates.filter((g) => g.status === "passed").length;
+  const pending = manifest.gates.filter((g) => g.status === "pending").length;
+
+  if (flags["json"] === true) {
+    const payload = {
+      capabilities: diags.map((d) => ({
+        id: d.id,
+        title: d.title,
+        contract: d.contract,
+        status: d.status,
+        claimed: d.claimed,
+        requiresPermissions: d.requiresPermissions,
+        acceptanceGateIds: d.acceptanceGateIds,
+        detail: d.detail,
+      })),
+      permissions: { defaultDeny: true, actions: [...PERMISSION_ACTIONS] },
+      acceptance: { total: manifest.gates.length, green, pending },
+    };
+    log(JSON.stringify(payload, null, 2));
+    return 0;
+  }
+
+  log("agent capabilities");
+  for (const d of diags) {
+    log(`  ${d.status.padEnd(11)} ${d.id.padEnd(30)} ${d.contract}`);
+  }
+  log("");
+  log(`permissions: default-deny (${PERMISSION_ACTIONS.join(", ")})`);
+  log(`acceptance gates: ${manifest.gates.length} total, ${green} green, ${pending} pending`);
   return 0;
 }
 
@@ -297,6 +345,7 @@ function usage(log: (s: string) => void): void {
   log("");
   log("Subcommands:");
   log("  providers                                   Show provider availability and auth.");
+  log("  capabilities [--json]                       Show parity capability status, permissions, gates.");
   log("  run <brief.json> [--provider id]            Plan (and optionally render) from a brief.");
   log("      [--max-iterations N] [--no-render]");
   log("  feedback --run ID --scope SCOPE --rule TEXT Save an explicit human correction.");

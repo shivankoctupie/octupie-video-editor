@@ -1,0 +1,159 @@
+{
+  "format": "octupie-parity-acceptance/v1",
+  "note": "Every future end-to-end gate for the eight parity capabilities. All gates are pending by design. A gate flips to passed ONLY when its executable end-to-end check actually passes against real output. Nothing here may be marked green while the backing capability is unimplemented.",
+  "gates": [
+    {
+      "id": "gate:semantic-video-understanding:segments",
+      "capability": "semantic-video-understanding",
+      "title": "Semantic segments from real footage",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "Given a real source clip, the provider returns time-ranged semantic segments whose ranges are within the clip duration, are non-overlapping or explicitly nested, and whose salience ranks a known key moment above filler."
+    },
+    {
+      "id": "gate:transcription-analysis:word-timing",
+      "capability": "transcription-analysis",
+      "title": "Word-level timing accuracy",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "Transcribing a known clip yields words whose start/end times are monotonic, lie within the clip, and align to a reference transcript within a stated tolerance."
+    },
+    {
+      "id": "gate:transcription-analysis:diarization",
+      "capability": "transcription-analysis",
+      "title": "Speaker diarization",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "A two-speaker clip returns at least two distinct speaker labels and assigns each reference line to the correct speaker within a stated accuracy."
+    },
+    {
+      "id": "gate:transcription-analysis:filler-silence-take",
+      "capability": "transcription-analysis",
+      "title": "Filler, silence, crew-prompt and take marks",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "A clip seeded with fillers, dead silence, an off-camera crew prompt, and a repeated take produces marks that flag each, and groups the repeated take."
+    },
+    {
+      "id": "gate:draft-critique-revision:frame-notes",
+      "capability": "draft-critique-revision",
+      "title": "Frame-anchored critique of the rendered master",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "Given a rendered master with a known defect at a known time, the critique returns a note anchored within tolerance of that time and marks a blocker."
+    },
+    {
+      "id": "gate:draft-critique-revision:bounded-rounds",
+      "capability": "draft-critique-revision",
+      "title": "Bounded revision loop",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "Revision proposals validate against the edit-plan schema, re-render, and the loop halts at the configured round cap, escalating to a human rather than looping."
+    },
+    {
+      "id": "gate:asset-discovery:local",
+      "capability": "asset-discovery",
+      "title": "Offline local discovery",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "Local discovery finds a seeded relevant asset under the asset root with no network access, returning a portable relative reference."
+    },
+    {
+      "id": "gate:asset-discovery:rights-metadata",
+      "capability": "asset-discovery",
+      "title": "Rights-safe results only",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "Every returned candidate carries explicit license id and attribution data; a candidate lacking a permissive license is never returned, and no unlicensed bytes are fetched."
+    },
+    {
+      "id": "gate:hook-variant-production:full-set",
+      "capability": "hook-variant-production",
+      "title": "Complete distinct hook set",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "Requesting N hook variants returns exactly N distinct variants, each with a renderer-ready plan fragment that validates against the edit-plan schema."
+    },
+    {
+      "id": "gate:hermes-integration:official-surface",
+      "capability": "hermes-integration",
+      "title": "Official surface only",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "Hermes connection uses only a configured MCP, API, or plugin endpoint and never reads a private credential store; unauthorized surfaces are refused."
+    },
+    {
+      "id": "gate:hermes-integration:standalone-preserved",
+      "capability": "hermes-integration",
+      "title": "Standalone still works without Hermes",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "With Hermes fully absent, the full offline plan-to-master pipeline still runs and passes QA, proving the integration is optional."
+    },
+    {
+      "id": "gate:improvement-proposals:approval-required",
+      "capability": "improvement-proposals",
+      "title": "No apply without approval",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "Applying an unapproved proposal is refused; applying is permitted only with an approval decision and a held code-change grant. No silent self-modification path exists."
+    },
+    {
+      "id": "gate:improvement-proposals:rollback",
+      "capability": "improvement-proposals",
+      "title": "Reversible with passing tests",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "An applied proposal ships with tests that pass, and its rollback plan restores the prior state verifiably."
+    },
+    {
+      "id": "gate:review-publishing:frame-comments",
+      "capability": "review-publishing",
+      "title": "Frame comments persist",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "A frame comment added at a time is stored against the correct version and retrievable with its anchor and resolved state."
+    },
+    {
+      "id": "gate:review-publishing:approvals-rbac",
+      "capability": "review-publishing",
+      "title": "Approvals gated by role",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "Only an approver or admin role can approve; a viewer or commenter is refused. Approval state is recorded on the version."
+    },
+    {
+      "id": "gate:review-publishing:version-compare",
+      "capability": "review-publishing",
+      "title": "Version comparison",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "Comparing two stored versions returns a truthful diff summary reflecting the real differences between the two masters."
+    },
+    {
+      "id": "gate:review-publishing:publish-adapter",
+      "capability": "review-publishing",
+      "title": "Publishing adapter with RBAC and grants",
+      "kind": "e2e",
+      "blocking": true,
+      "status": "pending",
+      "description": "Publishing requires an approved version, a publisher/admin role, and held publishing and media-upload grants; without any of these it is refused."
+    }
+  ]
+}
