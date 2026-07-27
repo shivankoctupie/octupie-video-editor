@@ -28,8 +28,11 @@ import type { ClipProbe } from "./manifest.js";
 import { resolveExistingAssetPath } from "../util/assetRoot.js";
 import { probe as ffprobe, videoStream, audioStream } from "../ffmpeg/ffprobe.js";
 import { diagnoseCapabilities } from "../capabilities/registry.js";
+import type { CapabilityProbe } from "../capabilities/types.js";
+import { buildCapabilityProbes } from "../capabilities/probes.js";
 import { loadAcceptanceManifest } from "../capabilities/acceptance.js";
 import { PERMISSION_ACTIONS } from "../permissions/policy.js";
+import { analyzeSource, defaultAnalysisOutDir } from "../analysis/analyze.js";
 
 export interface AgentCliDeps {
   log?: (s: string) => void;
@@ -44,6 +47,10 @@ export interface AgentCliDeps {
   prober?: (id: string, path: string) => Promise<ClipProbe>;
   /** Transcript loader override. The default reads a contained asset-root file. */
   transcriptLoader?: (path: string) => string;
+  /** Capability probe overrides (tests). Used by `capabilities --probe`. */
+  capabilityProbes?: Record<string, CapabilityProbe>;
+  /** Source analyzer override (tests). Defaults to the real local analyzer. */
+  analyze?: typeof analyzeSource;
 }
 
 interface Parsed {
@@ -88,7 +95,9 @@ export async function runAgentCli(argv: string[], deps: AgentCliDeps = {}): Prom
     case "providers":
       return cmdProviders(deps, log);
     case "capabilities":
-      return cmdCapabilities(flags, log);
+      return cmdCapabilities(flags, deps, log);
+    case "analyze":
+      return cmdAnalyze({ _, flags }, deps, log, errorLog);
     case "run":
       return cmdRun({ _, flags }, deps, home, log, errorLog);
     case "feedback":
@@ -125,9 +134,13 @@ async function cmdProviders(deps: AgentCliDeps, log: (s: string) => void): Promi
  */
 async function cmdCapabilities(
   flags: Record<string, string | boolean>,
+  deps: AgentCliDeps,
   log: (s: string) => void,
 ): Promise<number> {
-  const diags = await diagnoseCapabilities();
+  // Default stays fully offline and all-unavailable. `--probe` runs the real
+  // probes, which may report `configured` (never `verified` without a gate).
+  const probes = flags["probe"] === true ? (deps.capabilityProbes ?? buildCapabilityProbes()) : undefined;
+  const diags = await diagnoseCapabilities(probes ? { probes } : {});
   const manifest = loadAcceptanceManifest();
   const green = manifest.gates.filter((g) => g.status === "passed").length;
   const pending = manifest.gates.filter((g) => g.status === "pending").length;
@@ -263,6 +276,67 @@ async function cmdRun(
   }
 }
 
+/**
+ * `agent analyze <relClipPath>` runs the fully local source analysis: transcribe
+ * with the faster-whisper bridge, measure silence, run the deterministic editorial
+ * pass, and (optionally) sample frame metrics. It writes one validated analysis
+ * artifact plus transcript JSON, SRT, and VTT under the output directory. It never
+ * reaches the network (beyond the model's first-run download) and never writes
+ * beside the source media.
+ */
+async function cmdAnalyze(
+  parsed: Parsed,
+  deps: AgentCliDeps,
+  log: (s: string) => void,
+  errorLog: (s: string) => void,
+): Promise<number> {
+  const clipRelPath = parsed._[0];
+  if (!clipRelPath) {
+    errorLog("Usage: octupie-video-editor agent analyze <relative-clip-path> [--out DIR] [--model M] [--language L] [--allow-model-download] [--frames] [--json]");
+    return 2;
+  }
+  const outFlag = str(parsed.flags, "out");
+  const outDir = outFlag ? resolve(process.cwd(), outFlag) : defaultAnalysisOutDir(clipRelPath);
+  const analyze = deps.analyze ?? analyzeSource;
+
+  try {
+    const res = await analyze({
+      clipRelPath,
+      outDir,
+      ...(str(parsed.flags, "model") ? { model: str(parsed.flags, "model")! } : {}),
+      ...(str(parsed.flags, "language") ? { language: str(parsed.flags, "language")! } : {}),
+      allowModelDownload: parsed.flags["allow-model-download"] === true,
+      includeFrames: parsed.flags["frames"] === true,
+      ...(deps.now ? { now: deps.now } : {}),
+    });
+    if (parsed.flags["json"] === true) {
+      log(JSON.stringify({
+        analysisPath: res.analysisPath,
+        transcriptPath: res.transcriptPath,
+        srtPath: res.srtPath,
+        vttPath: res.vttPath,
+        durationSeconds: res.analysis.durationSeconds,
+        language: res.analysis.transcript.language,
+        words: res.analysis.transcript.words.length,
+        marks: res.analysis.marks.length,
+        takes: res.analysis.takes.length,
+        candidateHooks: res.analysis.candidateHooks.length,
+        frames: res.analysis.frames?.length ?? 0,
+      }, null, 2));
+    } else {
+      log(`analysis: ${res.analysisPath}`);
+      log(`transcript: ${res.transcriptPath}`);
+      log(`captions: ${res.srtPath}, ${res.vttPath}`);
+      log(`language: ${res.analysis.transcript.language}, words: ${res.analysis.transcript.words.length}, marks: ${res.analysis.marks.length}, takes: ${res.analysis.takes.length}, hooks: ${res.analysis.candidateHooks.length}`);
+      if (res.analysis.frames) log(`frames measured: ${res.analysis.frames.length}`);
+    }
+    return 0;
+  } catch (err) {
+    errorLog(`Analyze failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+}
+
 function cmdFeedback(
   flags: Record<string, string | boolean>,
   deps: AgentCliDeps,
@@ -345,7 +419,9 @@ function usage(log: (s: string) => void): void {
   log("");
   log("Subcommands:");
   log("  providers                                   Show provider availability and auth.");
-  log("  capabilities [--json]                       Show parity capability status, permissions, gates.");
+  log("  capabilities [--json] [--probe]             Show parity capability status, permissions, gates.");
+  log("  analyze <rel-clip> [--out DIR] [--model M]  Local transcription + editorial source analysis.");
+  log("      [--language L] [--allow-model-download] [--frames] [--json]");
   log("  run <brief.json> [--provider id]            Plan (and optionally render) from a brief.");
   log("      [--max-iterations N] [--no-render]");
   log("  feedback --run ID --scope SCOPE --rule TEXT Save an explicit human correction.");

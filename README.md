@@ -8,6 +8,8 @@ Proprietary and private. See `package.json` (`UNLICENSED`).
 
 - Node.js 20 or newer.
 - FFmpeg and FFprobe on `PATH` (or set `OVE_FFMPEG_PATH` and `OVE_FFPROBE_PATH`).
+- For local transcription: Python with `faster-whisper`.
+- For local frame measurements: Python with OpenCV (`cv2`) and NumPy.
 - On first render, Remotion downloads a headless browser shell automatically.
 
 ## Quick start
@@ -71,7 +73,26 @@ npm run agent -- feedback --run <runId> --scope creator --creator shivank --rule
 # List and deactivate learned rules
 npm run agent -- rules
 npm run agent -- deactivate --rule <ruleId>
+
+# Probe optional parity capabilities without claiming unverified gates
+npm run agent -- capabilities --probe --json
+
+# Analyze one contained source clip locally
+OVE_ASSET_ROOT=/path/to/media npm run agent -- analyze source/clip.mov --language en --allow-model-download --frames --json
 ```
+
+### Local source analysis
+
+`agent analyze` resolves the clip under `OVE_ASSET_ROOT`, extracts a temporary mono WAV under `output/analysis/`, transcribes it with Faster Whisper, and writes:
+
+- `analysis.json`, the validated source-analysis artifact.
+- `transcript.json`, including word-level timings.
+- `captions.srt` and `captions.vtt`.
+- Optional sampled-frame measurements when `--frames` is set.
+
+The local editorial pass records FFmpeg silence regions, lexical fillers, conservative crew or restart phrases, repeated-take groups, and heuristic hook candidates. OpenCV records blur, brightness, frontal-face boxes, and sampled-frame discontinuity. These are auditable measurements and heuristics. They are not semantic video understanding, expression recognition, or speaker diarization.
+
+The Python executable and model can be changed with `OVE_PYTHON`, `OVE_WHISPER_MODEL`, `OVE_WHISPER_DEVICE`, and `OVE_WHISPER_COMPUTE`. Named models are cached or local-only by default. Pass `--allow-model-download` explicitly when a missing named model may be downloaded. A local model path runs offline.
 
 A brief is JSON validated by `src/agent/brief.ts` (AgentBrief v1): objective,
 audience, platform, creator/style, preset, desired duration, relative source

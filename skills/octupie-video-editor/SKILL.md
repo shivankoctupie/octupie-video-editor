@@ -30,6 +30,10 @@ Every plan validates before it renders. The schema rejects negative times, out-o
 
 Before building audio, state one distinct editorial role per cue, then run the gate. Cues are story and motion, not decoration. Reserve hero stacks for the single largest payoff. `impact_ultra_serious_48k_pcm24.wav` and its derivatives are blacklisted. Never stack whoosh, riser, impact, and tick by default. See the full matrix, intensity hierarchy, whoosh-hit anatomy, and audition protocol in `../shivank-social-video-editing/references/sfx-selection-and-placement.md` and `../shivank-social-video-editing/references/dialogue-first-sfx-grammar.md`.
 
+## Source analysis
+
+Run `npm run agent -- analyze <relative-clip>` to inspect a contained source clip before planning. The local pipeline uses Faster Whisper for word timestamps, FFmpeg for silence and audio facts, and optional OpenCV frame measurements. It writes validated analysis JSON, transcript JSON, SRT, and VTT under `output/analysis/`. Treat filler, crew-prompt, repeated-take, and hook results as auditable heuristics. They are not semantic certainty. Named model downloads require the explicit `--allow-model-download` flag.
+
 ## Captions and phrase timing
 
 One line, one to three words per card. Group by meaning and edit boundaries, never bridge unrelated phrases to fill three words. Build timing from real word timestamps: start at the first word onset, hold through the final word tail. Regroup any card shorter than about 0.35 seconds. Caption details: `../shivank-social-video-editing/SKILL.md` (Captions and terminology).
