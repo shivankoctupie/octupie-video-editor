@@ -1,0 +1,21 @@
+{
+  "project": "replace-with-project-name",
+  "cues": [
+    {
+      "time": 1.25,
+      "asset": "subtle_air_whoosh.wav",
+      "family": "whoosh",
+      "intensity": "texture",
+      "role": "Describe the visible left-to-right card movement",
+      "duration": 0.45
+    },
+    {
+      "time": 4.8,
+      "asset": "light_product_lock.wav",
+      "family": "impact",
+      "intensity": "support",
+      "role": "Mark the exact frame where the product settles",
+      "duration": 0.3
+    }
+  ]
+}

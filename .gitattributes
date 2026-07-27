@@ -1,0 +1,16 @@
+# Normalize line endings for text; keep deterministic diffs.
+* text=auto eol=lf
+
+# Committed schema and JSON fixtures stay LF.
+*.json text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.md text eol=lf
+
+# Binary and media assets are never committed, but guard the classifier anyway.
+*.mp4 binary
+*.mov binary
+*.wav binary
+*.mp3 binary
+*.png binary
+*.jpg binary

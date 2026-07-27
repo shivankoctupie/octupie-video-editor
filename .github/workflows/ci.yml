@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install FFmpeg and FFprobe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Dash sweep (no em or en dashes)
+        run: npm run dash:sweep
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Verify committed JSON schema is up to date
+        run: |
+          npm run schema:gen
+          git diff --exit-code schema/edit-plan.schema.json
+
+      - name: Build
+        run: npm run build
+
+      - name: Doctor
+        run: npm run doctor
+
+      - name: Test (unit and render/QA integration)
+        run: npm test
+        env:
+          # Remotion downloads a headless browser on first render.
+          REMOTION_DISABLE_TELEMETRY: "1"

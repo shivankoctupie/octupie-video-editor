@@ -1,0 +1,10 @@
+node_modules/
+dist/
+output/
+*.log
+.env
+.env.local
+.DS_Store
+Thumbs.db
+coverage/
+.vitest/

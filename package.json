@@ -1,0 +1,55 @@
+{
+  "name": "octupie-video-editor",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Portable, deterministic AI-assisted video editing engine. Language models produce validated edit plans; deterministic code performs timing, captions, rendering, audio assembly, and QA.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "octupie-video-editor": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    "schema",
+    "skills",
+    "AGENTS.md",
+    "ARCHITECTURE.md",
+    "ASSET_POLICY.md",
+    "PRODUCTIZATION.md",
+    "STYLE_LEARNING.md",
+    "WORKSPACE_AUDIT.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "schema:gen": "tsx src/schema/generate.ts",
+    "cli": "tsx src/cli.ts",
+    "doctor": "tsx src/cli.ts doctor",
+    "demo": "tsx src/cli.ts demo",
+    "sfx:fetch": "tsx scripts/fetch-sfx.ts",
+    "dash:sweep": "node scripts/dash-sweep.mjs"
+  },
+  "dependencies": {
+    "@remotion/bundler": "^4.0.0",
+    "@remotion/renderer": "^4.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.0",
+    "zod": "^3.24.0",
+    "zod-to-json-schema": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.10"
+  }
+}

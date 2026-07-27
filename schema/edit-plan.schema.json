@@ -1,0 +1,408 @@
+{
+  "$ref": "#/definitions/OctupieEditPlan",
+  "definitions": {
+    "OctupieEditPlan": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "type": "string",
+          "const": "octupie-edit-plan/v1"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "preset": {
+          "type": "string",
+          "minLength": 1
+        },
+        "composition": {
+          "type": "string",
+          "enum": [
+            "PremiumProductFilm",
+            "FounderSocialReel"
+          ]
+        },
+        "width": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "fps": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 120
+        },
+        "duration": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "brand": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "font": {
+              "type": "string",
+              "minLength": 1
+            },
+            "paper": {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}$"
+            },
+            "ink": {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}$"
+            },
+            "accent": {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}$"
+            },
+            "paper2": {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}$"
+            }
+          },
+          "required": [
+            "name",
+            "font",
+            "paper",
+            "ink",
+            "accent"
+          ],
+          "additionalProperties": false
+        },
+        "scenes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "intro",
+                  "hook",
+                  "proof",
+                  "explanation",
+                  "breather",
+                  "payoff",
+                  "product-reveal",
+                  "logo-lockup",
+                  "cta",
+                  "title"
+                ]
+              },
+              "start": {
+                "type": "number",
+                "minimum": 0
+              },
+              "end": {
+                "type": "number"
+              },
+              "heading": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              },
+              "emphasis": {
+                "type": "string"
+              },
+              "frameZero": {
+                "type": "string"
+              },
+              "punchIn": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 2
+              },
+              "broll": {
+                "type": "string"
+              },
+              "sourceClipId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sourceIn": {
+                "type": "number",
+                "minimum": 0
+              },
+              "mute": {
+                "type": "boolean"
+              },
+              "fit": {
+                "type": "string",
+                "enum": [
+                  "cover",
+                  "contain"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "start",
+              "end"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1
+        },
+        "captions": {
+          "type": "object",
+          "properties": {
+            "maxWordsPerCard": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8,
+              "default": 3
+            },
+            "allowExtendedCards": {
+              "type": "boolean",
+              "default": false
+            },
+            "cards": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "start": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "end": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "text",
+                  "start",
+                  "end"
+                ],
+                "additionalProperties": false
+              },
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "maxWordsPerCard": 3,
+            "allowExtendedCards": false,
+            "cards": []
+          }
+        },
+        "sourceClips": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "path": {
+                "type": "string"
+              },
+              "in": {
+                "type": "number",
+                "minimum": 0
+              },
+              "out": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "path"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "audio": {
+          "type": "object",
+          "properties": {
+            "targetLufs": {
+              "type": "number",
+              "default": -16
+            },
+            "truePeakDb": {
+              "type": "number",
+              "default": -1.5
+            },
+            "dialoguePath": {
+              "type": "string"
+            },
+            "music": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "license": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sourceUrl": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "path",
+                "license",
+                "sourceUrl"
+              ],
+              "additionalProperties": false
+            },
+            "sfx": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "asset": {
+                    "type": "string"
+                  },
+                  "family": {
+                    "type": "string",
+                    "enum": [
+                      "ambience",
+                      "foley",
+                      "whoosh",
+                      "riser",
+                      "impact",
+                      "ui",
+                      "tick",
+                      "paper",
+                      "tonal",
+                      "glitch",
+                      "other"
+                    ]
+                  },
+                  "intensity": {
+                    "type": "string",
+                    "enum": [
+                      "texture",
+                      "support",
+                      "hero"
+                    ]
+                  },
+                  "role": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "duration": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "time",
+                  "asset",
+                  "family",
+                  "intensity",
+                  "role"
+                ],
+                "additionalProperties": false
+              },
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "targetLufs": -16,
+            "truePeakDb": -1.5,
+            "sfx": []
+          }
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "fileName": {
+              "type": "string"
+            },
+            "container": {
+              "type": "string",
+              "const": "mp4",
+              "default": "mp4"
+            },
+            "videoCodec": {
+              "type": "string",
+              "const": "h264",
+              "default": "h264"
+            },
+            "pixelFormat": {
+              "type": "string",
+              "const": "yuv420p",
+              "default": "yuv420p"
+            },
+            "audioCodec": {
+              "type": "string",
+              "const": "aac",
+              "default": "aac"
+            },
+            "audioSampleRate": {
+              "type": "number",
+              "const": 48000,
+              "default": 48000
+            },
+            "videoBitrate": {
+              "type": "string",
+              "default": "12M"
+            },
+            "audioBitrate": {
+              "type": "string",
+              "default": "192k"
+            },
+            "faststart": {
+              "type": "boolean",
+              "default": true
+            },
+            "stripMetadata": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "fileName"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "format",
+        "title",
+        "preset",
+        "composition",
+        "width",
+        "height",
+        "fps",
+        "duration",
+        "brand",
+        "scenes",
+        "output"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Octupie Edit Plan",
+  "description": "The stable contract between the planning layer and the deterministic renderer. Structural rules are enforced here; cross-field rules (no overlapping scenes, scenes and cues within duration, one-to-three-word captions unless the preset extends them, no blacklisted SFX, no default whoosh+riser+impact stack) are enforced by the Zod validator and CLI 'validate' command."
+}

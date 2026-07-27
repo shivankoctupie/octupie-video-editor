@@ -1,0 +1,34 @@
+{
+  "project": "the-oblist-v2-regression",
+  "note": "Preserved rejected cue from ~0:33. Blacklisted asset plus a default whoosh+riser+impact+tick stack. Must always fail validation.",
+  "cues": [
+    {
+      "time": 33.0,
+      "asset": "cinematic_whoosh_fast_transition.wav",
+      "family": "whoosh",
+      "intensity": "support",
+      "role": "Approach into the reveal"
+    },
+    {
+      "time": 33.02,
+      "asset": "tension_riser_long.wav",
+      "family": "riser",
+      "intensity": "hero",
+      "role": "Anticipation before the reveal"
+    },
+    {
+      "time": 33.05,
+      "asset": "impact_ultra_serious_48k_pcm24.wav",
+      "family": "impact",
+      "intensity": "hero",
+      "role": "Landing punctuation"
+    },
+    {
+      "time": 33.06,
+      "asset": "digital_tick.wav",
+      "family": "tick",
+      "intensity": "support",
+      "role": "Extra accent tick"
+    }
+  ]
+}
