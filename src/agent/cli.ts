@@ -42,6 +42,11 @@ import { ASSET_SOURCE_KINDS, type AssetSourceKind } from "../discovery/schemas.j
 import { produceHookVariants, type HookProviderId } from "../hooks/produce.js";
 import { connectHermes, orchestrateHermes, type HermesFetch } from "../hermes/client.js";
 import { HERMES_DEFAULT_BASE_URL } from "../hermes/schemas.js";
+import { applyProposal, ImprovementGateError, type TestRunner } from "../improvements/apply.js";
+import { rollbackProposal } from "../improvements/rollback.js";
+import { testCommandArgv } from "../improvements/schemas.js";
+import { execProcess, type ExecFn } from "./exec.js";
+import { PermissionDeniedError } from "../permissions/policy.js";
 
 export interface AgentCliDeps {
   log?: (s: string) => void;
@@ -78,6 +83,14 @@ export interface AgentCliDeps {
   hermesConnect?: typeof connectHermes;
   /** Hermes orchestrate override (tests). Defaults to the real official adapter. */
   hermesOrchestrate?: typeof orchestrateHermes;
+  /** Improvement-apply override (tests). Defaults to the real deterministic engine. */
+  applyImprovement?: typeof applyProposal;
+  /** Improvement-rollback override (tests). Defaults to the real deterministic engine. */
+  rollbackImprovement?: typeof rollbackProposal;
+  /** Injected test runner for improvement apply. Defaults to a shell:false exec runner. */
+  improvementTestRunner?: TestRunner;
+  /** Process runner for the default improvement test runner (tests). Defaults to execProcess. */
+  exec?: ExecFn;
 }
 
 interface Parsed {
@@ -139,6 +152,10 @@ export async function runAgentCli(argv: string[], deps: AgentCliDeps = {}): Prom
       return cmdHermesCheck({ _, flags }, deps, log, errorLog);
     case "hermes-orchestrate":
       return cmdHermesOrchestrate({ _, flags }, deps, log, errorLog);
+    case "improvement-apply":
+      return cmdImprovementApply({ _, flags }, deps, log, errorLog);
+    case "improvement-rollback":
+      return cmdImprovementRollback({ _, flags }, deps, log, errorLog);
     case "run":
       return cmdRun({ _, flags }, deps, home, log, errorLog);
     case "feedback":
@@ -974,6 +991,170 @@ async function cmdHermesOrchestrate(
   }
 }
 
+/** The only source of a code-change grant is the explicit `--allow-code-change` flag. */
+function readJsonFile(path: string, label: string): { ok: true; json: unknown } | { ok: false; message: string } {
+  let raw: string;
+  try {
+    raw = readFileSync(resolve(process.cwd(), path), "utf8");
+  } catch (err) {
+    return { ok: false, message: `Could not read ${label}: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  if (raw.length > 8 * 1024 * 1024) return { ok: false, message: `${label} is too large.` };
+  try {
+    return { ok: true, json: JSON.parse(raw) };
+  } catch (err) {
+    return { ok: false, message: `${label} is not valid JSON: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+/**
+ * A shell:false test runner for improvement apply. It tokenizes each already
+ * allowlisted command into an explicit argv and runs it with no shell, so no test
+ * string is ever interpreted by a command line. Never used by the core engine.
+ */
+function cliImprovementTestRunner(exec: ExecFn, cwd: string): TestRunner {
+  return async (command) => {
+    const argv = testCommandArgv(command);
+    const bin = process.platform === "win32" ? `${argv[0]}.cmd` : argv[0]!;
+    const res = await exec(bin, argv.slice(1), { cwd, timeoutMs: 600_000 });
+    const ok = res.spawnError === undefined && !res.timedOut && res.code === 0;
+    const detail = ok
+      ? "passed"
+      : res.spawnError
+        ? `spawn error: ${res.spawnError}`
+        : res.timedOut
+          ? "timed out"
+          : `exit ${res.code}`;
+    return { command, ok, detail };
+  };
+}
+
+/**
+ * `agent improvement-apply PROPOSAL.json --decision DECISION.json --allow-code-change`
+ * applies a reviewed proposal only with an explicit matching approval decision and
+ * an explicit `--allow-code-change` grant, checked before any write. Every operation
+ * is preflighted; on any write or test failure the touched files are restored and the
+ * proposal is marked failed. Audit and exact backups are written under the state root.
+ */
+async function cmdImprovementApply(
+  parsed: Parsed,
+  deps: AgentCliDeps,
+  log: (s: string) => void,
+  errorLog: (s: string) => void,
+): Promise<number> {
+  const proposalPath = parsed._[0];
+  const decisionPath = str(parsed.flags, "decision");
+  if (!proposalPath || !decisionPath) {
+    errorLog("Usage: octupie-video-editor agent improvement-apply PROPOSAL.json --decision DECISION.json --allow-code-change [--state-root PATH] [--json]");
+    return 2;
+  }
+  if (parsed.flags["allow-code-change"] !== true) {
+    errorLog("Applying an improvement requires the explicit --allow-code-change grant. There is no apply path without it.");
+    return 2;
+  }
+
+  const proposal = readJsonFile(proposalPath, "proposal");
+  if (!proposal.ok) {
+    errorLog(proposal.message);
+    return 2;
+  }
+  const decision = readJsonFile(decisionPath, "decision");
+  if (!decision.ok) {
+    errorLog(decision.message);
+    return 2;
+  }
+
+  const now = deps.now ?? new Date();
+  const policy = createPolicy([
+    { action: "code-change", grantedBy: "operator-cli", grantedAt: now.toISOString(), reason: "improvement apply" },
+  ]);
+  const stateRoot = resolve(process.cwd(), str(parsed.flags, "state-root") ?? "output/improvements");
+  const apply = deps.applyImprovement ?? applyProposal;
+  const testRunner = deps.improvementTestRunner ?? cliImprovementTestRunner(deps.exec ?? execProcess, process.cwd());
+
+  try {
+    const result = await apply({ proposal: proposal.json, decision: decision.json, policy, testRunner, stateRoot, now });
+    if (parsed.flags["json"] === true) {
+      log(JSON.stringify(result, null, 2));
+    } else {
+      log(`improvement-apply: ${result.status} (rolledBack=${result.rolledBack})`);
+      for (const op of result.operations) log(`  ${op.path}  ${op.beforeSha256.slice(0, 12)} -> ${op.afterSha256.slice(0, 12)}`);
+      for (const t of result.tests) log(`  test ${t.ok ? "PASS" : "FAIL"} ${t.command}${t.ok ? "" : " (" + t.detail + ")"}`);
+      if (result.auditPath) log(`audit: ${result.auditPath}`);
+      if (result.failure) log(`failure: ${result.failure}`);
+    }
+    return result.status === "applied" ? 0 : 1;
+  } catch (err) {
+    if (err instanceof ImprovementGateError || err instanceof PermissionDeniedError) {
+      errorLog(`improvement-apply blocked: ${err.message}`);
+      return 2;
+    }
+    errorLog(`improvement-apply failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+}
+
+/**
+ * `agent improvement-rollback PROPOSAL.json --decision DECISION.json --allow-code-change`
+ * restores an applied proposal's exact prior bytes. It needs a matching rollback-action
+ * approval decision, an explicit `--allow-code-change` grant, and a prior applied audit
+ * record that passes its integrity check. It refuses a tampered audit or a changed file.
+ */
+async function cmdImprovementRollback(
+  parsed: Parsed,
+  deps: AgentCliDeps,
+  log: (s: string) => void,
+  errorLog: (s: string) => void,
+): Promise<number> {
+  const proposalPath = parsed._[0];
+  const decisionPath = str(parsed.flags, "decision");
+  if (!proposalPath || !decisionPath) {
+    errorLog("Usage: octupie-video-editor agent improvement-rollback PROPOSAL.json --decision DECISION.json --allow-code-change [--state-root PATH] [--json]");
+    return 2;
+  }
+  if (parsed.flags["allow-code-change"] !== true) {
+    errorLog("Rolling back an improvement requires the explicit --allow-code-change grant.");
+    return 2;
+  }
+
+  const proposal = readJsonFile(proposalPath, "proposal");
+  if (!proposal.ok) {
+    errorLog(proposal.message);
+    return 2;
+  }
+  const decision = readJsonFile(decisionPath, "decision");
+  if (!decision.ok) {
+    errorLog(decision.message);
+    return 2;
+  }
+
+  const now = deps.now ?? new Date();
+  const policy = createPolicy([
+    { action: "code-change", grantedBy: "operator-cli", grantedAt: now.toISOString(), reason: "improvement rollback" },
+  ]);
+  const stateRoot = resolve(process.cwd(), str(parsed.flags, "state-root") ?? "output/improvements");
+  const rollback = deps.rollbackImprovement ?? rollbackProposal;
+
+  try {
+    const result = await rollback({ proposal: proposal.json, decision: decision.json, policy, stateRoot, now });
+    if (parsed.flags["json"] === true) {
+      log(JSON.stringify(result, null, 2));
+    } else {
+      log(`improvement-rollback: ${result.status} (alreadyRolledBack=${result.alreadyRolledBack})`);
+      for (const op of result.operations) log(`  ${op.path}  restored ${op.restoredSha256.slice(0, 12)}`);
+      if (result.auditPath) log(`audit: ${result.auditPath}`);
+    }
+    return 0;
+  } catch (err) {
+    if (err instanceof ImprovementGateError || err instanceof PermissionDeniedError) {
+      errorLog(`improvement-rollback blocked: ${err.message}`);
+      return 2;
+    }
+    errorLog(`improvement-rollback failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+}
+
 function cmdFeedback(
   flags: Record<string, string | boolean>,
   deps: AgentCliDeps,
@@ -1074,6 +1255,10 @@ function usage(log: (s: string) => void): void {
   log(`      [--model NAME] --allow-network [--json]  (token via ${HERMES_TOKEN_ENV}; default ${HERMES_DEFAULT_BASE_URL})`);
   log("  hermes-orchestrate --endpoint URL           DATA-ONLY guidance from the Hermes API Server (optional).");
   log("      --objective TEXT --stage NAME [--context-file PATH] [--model NAME] --allow-network [--json]");
+  log("  improvement-apply PROPOSAL.json             Apply a reviewed proposal after explicit approval.");
+  log("      --decision DECISION.json --allow-code-change [--state-root PATH] [--json]");
+  log("  improvement-rollback PROPOSAL.json          Restore an applied proposal's exact prior bytes.");
+  log("      --decision DECISION.json --allow-code-change [--state-root PATH] [--json]");
   log("  run <brief.json> [--provider id]            Plan (and optionally render) from a brief.");
   log("      [--max-iterations N] [--no-render]");
   log("  feedback --run ID --scope SCOPE --rule TEXT Save an explicit human correction.");

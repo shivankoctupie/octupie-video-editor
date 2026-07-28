@@ -222,6 +222,22 @@ export function hookVariantProductionProbe(claudeBin: string, runner: ExecFn = e
 }
 
 /**
+ * Probe for reviewed improvement proposals. The deterministic apply/rollback
+ * engine is always present, so this reports `configured` (a real backing exists
+ * but the approval-required and rollback gates have not passed with executable
+ * evidence). It never reports `verified`; only a passed acceptance gate can, and
+ * the registry downgrades any unproven claim regardless. It reads no files and
+ * never proposes or applies anything.
+ */
+export function improvementProposalsProbe(): CapabilityProbe {
+  return async () => ({
+    status: "configured",
+    detail:
+      "Deterministic improvement apply/rollback engine is present; applying requires an explicit human approval decision plus a code-change grant. The approval-required and rollback gates are not yet passed with executable evidence.",
+  });
+}
+
+/**
  * Offline probe for optional Hermes integration. It NEVER hits the network: it
  * reports based only on whether an endpoint and a token are configured. Without
  * both it is `unavailable` (standalone offline default in effect). With both it
@@ -285,6 +301,7 @@ export function buildCapabilityProbes(deps: CapabilityProbeDeps = {}): Record<st
       ...(deps.webConfigured !== undefined ? { webConfigured: deps.webConfigured } : {}),
     }),
     "hook-variant-production": hookVariantProductionProbe(claudeBin, runner),
+    "improvement-proposals": improvementProposalsProbe(),
     "hermes-integration": hermesIntegrationProbe({
       ...(hermesEndpoint !== undefined ? { endpoint: hermesEndpoint } : {}),
       tokenPresent: hermesTokenPresent,

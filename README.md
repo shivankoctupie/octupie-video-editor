@@ -161,6 +161,21 @@ Both `agent hermes-check` and `agent hermes-orchestrate` require `--allow-networ
 
 Without an endpoint, token, or network grant, the integration is unavailable and the existing analysis, planning, rendering, QA, discovery, and deterministic hook workflows continue unchanged.
 
+### Approved and reversible improvements
+
+Improvement proposals are reviewed data artifacts, never silent self-modification. A proposal contains a bounded `octupie-replace-v1` full-file replacement patch, exact prior bytes and hashes, allowlisted tests, and a rollback plan. Only `src/`, `tests/`, `skills/`, `prompts/`, `README.md`, and `AGENTS.md` can be changed. Traversal, symlink escapes, protected credential paths, binaries, stale files, duplicates, oversized patches, and shell-like test commands are rejected before source writes.
+
+Apply requires both a separate matching human decision and the explicit `--allow-code-change` grant:
+
+```bash
+npm run agent -- improvement-apply proposal.json --decision apply-decision.json --allow-code-change --state-root output/improvements
+npm run agent -- improvement-rollback proposal.json --decision rollback-decision.json --allow-code-change --state-root output/improvements
+```
+
+All operations are preflighted before the first source write. Tests run only through a `shell:false` allowlist. A source-write, test-runner, failed test, or final audit-write failure restores exact prior bytes. Successful application records hashes, exact backups, approval identity, and an integrity-stamped audit. Rollback needs a new rollback decision and grant, refuses changed files or a mismatched audit, restores exact prior bytes transactionally, and is idempotent.
+
+Limitations: this phase validates and applies a proposal supplied by a human or external provider. It does not let a model apply its own output. The local integrity hash detects accidental or simple audit edits, but the state directory should still be protected by operating-system access controls.
+
 A brief is JSON validated by `src/agent/brief.ts` (AgentBrief v1): objective,
 audience, platform, creator/style, preset, desired duration, relative source
 clips, optional transcript text or path, output file, constraints, an optional
