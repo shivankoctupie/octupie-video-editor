@@ -45,6 +45,8 @@ import { HERMES_DEFAULT_BASE_URL } from "../hermes/schemas.js";
 import { applyProposal, ImprovementGateError, type TestRunner } from "../improvements/apply.js";
 import { rollbackProposal } from "../improvements/rollback.js";
 import { testCommandArgv } from "../improvements/schemas.js";
+import { authorize, isWorkflowAction, isWorkflowRole, WORKFLOW_ACTIONS, WORKFLOW_ROLES } from "../workflow/rbac.js";
+import { publish as workflowPublish, disabledPublishingAdapter, type PublishingAdapter } from "../workflow/publishing.js";
 import { execProcess, type ExecFn } from "./exec.js";
 import { PermissionDeniedError } from "../permissions/policy.js";
 
@@ -91,6 +93,10 @@ export interface AgentCliDeps {
   improvementTestRunner?: TestRunner;
   /** Process runner for the default improvement test runner (tests). Defaults to execProcess. */
   exec?: ExecFn;
+  /** Workflow publish override (tests). Defaults to the real deterministic publish flow. */
+  publishWorkflow?: typeof workflowPublish;
+  /** Publishing adapter override (tests). Defaults to the disabled adapter (publishing off). */
+  publishingAdapter?: PublishingAdapter;
 }
 
 interface Parsed {
@@ -156,6 +162,10 @@ export async function runAgentCli(argv: string[], deps: AgentCliDeps = {}): Prom
       return cmdImprovementApply({ _, flags }, deps, log, errorLog);
     case "improvement-rollback":
       return cmdImprovementRollback({ _, flags }, deps, log, errorLog);
+    case "workflow-authorize":
+      return cmdWorkflowAuthorize({ _, flags }, log, errorLog);
+    case "workflow-publish":
+      return cmdWorkflowPublish({ _, flags }, deps, log, errorLog);
     case "run":
       return cmdRun({ _, flags }, deps, home, log, errorLog);
     case "feedback":
@@ -1155,6 +1165,96 @@ async function cmdImprovementRollback(
   }
 }
 
+/**
+ * `agent workflow-authorize ROLE ACTION` reports the pure, default-deny RBAC
+ * decision for a (role, action) pair. Exit 0 when allowed, 1 when denied, 2 for an
+ * unknown role or action (a usage error). It never touches the filesystem.
+ */
+function cmdWorkflowAuthorize(
+  parsed: Parsed,
+  log: (s: string) => void,
+  errorLog: (s: string) => void,
+): number {
+  const role = parsed._[0];
+  const action = parsed._[1];
+  if (!role || !action) {
+    errorLog(`Usage: octupie-video-editor agent workflow-authorize ROLE ACTION  (roles: ${WORKFLOW_ROLES.join(", ")}; actions: ${WORKFLOW_ACTIONS.join(", ")})`);
+    return 2;
+  }
+  if (!isWorkflowRole(role)) {
+    errorLog(`Unknown role '${role}'. Known roles: ${WORKFLOW_ROLES.join(", ")}.`);
+    return 2;
+  }
+  if (!isWorkflowAction(action)) {
+    errorLog(`Unknown action '${action}'. Known actions: ${WORKFLOW_ACTIONS.join(", ")}.`);
+    return 2;
+  }
+  const allowed = authorize(role, action);
+  log(`${allowed ? "ALLOW" : "DENY"} ${role} ${action}`);
+  return allowed ? 0 : 1;
+}
+
+/**
+ * `agent workflow-publish REQUEST.json --allow-publish` runs the gated publish flow
+ * with injectable dependencies. Publishing is disabled by default: without
+ * `--allow-publish` there is no publishing grant, and the default adapter is the
+ * disabled one, so a publish always blocks. Exit 0 only on a real published result;
+ * 1 on a blocked or failed attempt; 2 on a usage or input error.
+ */
+async function cmdWorkflowPublish(
+  parsed: Parsed,
+  deps: AgentCliDeps,
+  log: (s: string) => void,
+  errorLog: (s: string) => void,
+): Promise<number> {
+  const requestPath = parsed._[0];
+  if (!requestPath) {
+    errorLog("Usage: octupie-video-editor agent workflow-publish REQUEST.json --allow-publish [--state-root PATH] [--project-root PATH] [--json]");
+    return 2;
+  }
+  if (parsed.flags["allow-publish"] !== true) {
+    errorLog("Publishing requires the explicit --allow-publish grant. It is disabled by default and there is no publish path without it.");
+    return 2;
+  }
+
+  const request = readJsonFile(requestPath, "publish request");
+  if (!request.ok) {
+    errorLog(request.message);
+    return 2;
+  }
+
+  const now = deps.now ?? new Date();
+  const policy = createPolicy([
+    { action: "publishing", grantedBy: "operator-cli", grantedAt: now.toISOString(), reason: "workflow publish" },
+  ]);
+  const stateRoot = resolve(process.cwd(), str(parsed.flags, "state-root") ?? "output/workflow");
+  const projectRoot = resolve(process.cwd(), str(parsed.flags, "project-root") ?? ".");
+  const adapter = deps.publishingAdapter ?? disabledPublishingAdapter;
+  const publishFn = deps.publishWorkflow ?? workflowPublish;
+
+  try {
+    const result = await publishFn({
+      request: request.json,
+      store: { stateRoot, projectRoot, now },
+      policy,
+      adapter,
+      now,
+    });
+    if (parsed.flags["json"] === true) {
+      log(JSON.stringify(result, null, 2));
+    } else {
+      log(`workflow-publish: ${result.status}${result.gate ? ` (gate ${result.gate})` : ""}`);
+      log(`  ${result.reason}`);
+      if (result.receiptPath) log(`  receipt: ${result.receiptPath}`);
+      if (result.publishedVersionId) log(`  published version: ${result.publishedVersionId}`);
+    }
+    return result.status === "published" ? 0 : 1;
+  } catch (err) {
+    errorLog(`workflow-publish failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+}
+
 function cmdFeedback(
   flags: Record<string, string | boolean>,
   deps: AgentCliDeps,
@@ -1259,6 +1359,9 @@ function usage(log: (s: string) => void): void {
   log("      --decision DECISION.json --allow-code-change [--state-root PATH] [--json]");
   log("  improvement-rollback PROPOSAL.json          Restore an applied proposal's exact prior bytes.");
   log("      --decision DECISION.json --allow-code-change [--state-root PATH] [--json]");
+  log("  workflow-authorize ROLE ACTION              Pure default-deny RBAC decision (exit 0 allow, 1 deny).");
+  log("  workflow-publish REQUEST.json               Gated publish; disabled by default, needs --allow-publish.");
+  log("      --allow-publish [--state-root PATH] [--project-root PATH] [--json]");
   log("  run <brief.json> [--provider id]            Plan (and optionally render) from a brief.");
   log("      [--max-iterations N] [--no-render]");
   log("  feedback --run ID --scope SCOPE --rule TEXT Save an explicit human correction.");

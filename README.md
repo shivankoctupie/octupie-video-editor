@@ -176,6 +176,21 @@ All operations are preflighted before the first source write. Tests run only thr
 
 Limitations: this phase validates and applies a proposal supplied by a human or external provider. It does not let a model apply its own output. The local integrity hash detects accidental or simple audit edits, but the state directory should still be protected by operating-system access controls.
 
+### Local workflow, review, and publishing controls
+
+The workflow layer is local-first and data-only. It provides default-deny RBAC for viewer, editor, approver, publisher, and admin roles. Plans and optional masters are recorded as immutable, monotonically numbered versions with real SHA-256 hashes. Editors submit a draft by creating a new in-review version. Approvers create a separate approved or rejected version. Existing version records are never mutated.
+
+The file-backed queue stores bounded analyze, plan, render, QA, and publish jobs. It applies FIFO claims, explicit transitions, idempotency keys, and a three-attempt cap. Job payloads are JSON data and are never executed. The default notification adapter writes a bounded local outbox only.
+
+Publishing is disabled by default. The shipped `disabled` adapter cannot reach a network and always blocks. A configured external adapter is invoked only after an approved version, publisher or admin role, explicit `publishing` grant, confirmed rights, passed QA, matching adapter, and unused idempotency key have all passed. Adapter output is strict bounded JSON data. Success writes one immutable receipt without mutating the approved version. Failed and blocked attempts write no receipt.
+
+```bash
+npm run agent -- workflow-authorize publisher publish
+npm run agent -- workflow-publish request.json --allow-publish --state-root output/workflow --project-root .
+```
+
+Limitations: no external publishing adapter ships with the repository. Frame-level review UI and visual version comparison are product-surface work built over the immutable records, not implemented as a browser application here. File-backed stores are intended for one local worker at a time. A multi-worker deployment needs a transactional database queue and unique constraints.
+
 A brief is JSON validated by `src/agent/brief.ts` (AgentBrief v1): objective,
 audience, platform, creator/style, preset, desired duration, relative source
 clips, optional transcript text or path, output file, constraints, an optional

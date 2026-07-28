@@ -238,6 +238,25 @@ export function improvementProposalsProbe(): CapabilityProbe {
 }
 
 /**
+ * Probe for human review and publishing (parity phase 8). The deterministic
+ * workflow controls (RBAC, immutable versioning, review decisions, the file-backed
+ * queue, and local notifications) are always present, so this reports `configured`.
+ * It states plainly that publishing is DISABLED BY DEFAULT: the only registered
+ * adapter is the disabled one, which always blocks and does no network. It never
+ * reports `verified`; only a passed acceptance gate can, and the registry downgrades
+ * any unproven claim regardless. It reads no files and publishes nothing.
+ */
+export function reviewPublishingProbe(): CapabilityProbe {
+  return async () => ({
+    status: "configured",
+    detail:
+      "Workflow controls are present: RBAC (default-deny), immutable hashed versioning, human review, a data-only file-backed queue, and local-only notifications. " +
+      "Publishing is disabled by default (only the 'disabled' adapter is registered; it always blocks and does no network). " +
+      "The frame-comments, approvals-rbac, version-compare, and publish-adapter gates are not yet passed with executable evidence.",
+  });
+}
+
+/**
  * Offline probe for optional Hermes integration. It NEVER hits the network: it
  * reports based only on whether an endpoint and a token are configured. Without
  * both it is `unavailable` (standalone offline default in effect). With both it
@@ -302,6 +321,7 @@ export function buildCapabilityProbes(deps: CapabilityProbeDeps = {}): Record<st
     }),
     "hook-variant-production": hookVariantProductionProbe(claudeBin, runner),
     "improvement-proposals": improvementProposalsProbe(),
+    "review-publishing": reviewPublishingProbe(),
     "hermes-integration": hermesIntegrationProbe({
       ...(hermesEndpoint !== undefined ? { endpoint: hermesEndpoint } : {}),
       tokenPresent: hermesTokenPresent,
