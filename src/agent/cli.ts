@@ -40,6 +40,8 @@ import { reviewPlan } from "../critique/review.js";
 import { discoverAssets } from "../discovery/discover.js";
 import { ASSET_SOURCE_KINDS, type AssetSourceKind } from "../discovery/schemas.js";
 import { produceHookVariants, type HookProviderId } from "../hooks/produce.js";
+import { connectHermes, orchestrateHermes, type HermesFetch } from "../hermes/client.js";
+import { HERMES_DEFAULT_BASE_URL } from "../hermes/schemas.js";
 
 export interface AgentCliDeps {
   log?: (s: string) => void;
@@ -68,6 +70,14 @@ export interface AgentCliDeps {
   discoverAssets?: typeof discoverAssets;
   /** Hook-variant production override (tests). Defaults to the real orchestrator. */
   produceHookVariants?: typeof produceHookVariants;
+  /** Environment source (tests). Defaults to `process.env`. Used to read the Hermes token. */
+  env?: Record<string, string | undefined>;
+  /** Hermes transport override (tests). Defaults to the real global-fetch transport. */
+  hermesFetch?: HermesFetch;
+  /** Hermes connect override (tests). Defaults to the real official adapter. */
+  hermesConnect?: typeof connectHermes;
+  /** Hermes orchestrate override (tests). Defaults to the real official adapter. */
+  hermesOrchestrate?: typeof orchestrateHermes;
 }
 
 interface Parsed {
@@ -125,6 +135,10 @@ export async function runAgentCli(argv: string[], deps: AgentCliDeps = {}): Prom
       return cmdDiscoverAssets({ _, flags }, deps, log, errorLog);
     case "hook-variants":
       return cmdHookVariants({ _, flags }, deps, log, errorLog);
+    case "hermes-check":
+      return cmdHermesCheck({ _, flags }, deps, log, errorLog);
+    case "hermes-orchestrate":
+      return cmdHermesOrchestrate({ _, flags }, deps, log, errorLog);
     case "run":
       return cmdRun({ _, flags }, deps, home, log, errorLog);
     case "feedback":
@@ -781,6 +795,185 @@ async function cmdHookVariants(
   }
 }
 
+/** The ONLY source of a Hermes token. It is never a CLI flag and never printed. */
+const HERMES_TOKEN_ENV = "OCTUPIE_HERMES_API_KEY";
+/** Flags that would smuggle a token onto argv. Rejected outright. */
+const HERMES_TOKEN_FLAGS = ["api-key", "apikey", "token", "key", "bearer"];
+
+interface HermesGate {
+  ok: boolean;
+  code: number;
+  token?: string;
+  endpoint?: string;
+}
+
+/**
+ * Shared pre-flight for the Hermes commands: an endpoint, an explicit
+ * `--allow-network` grant, and a token that comes ONLY from the environment. Any
+ * missing gate is a usage/config failure (exit 2) BEFORE any fetch. The token is
+ * never echoed, even on error.
+ */
+function hermesGate(
+  parsed: Parsed,
+  deps: AgentCliDeps,
+  errorLog: (s: string) => void,
+  usageLine: string,
+): HermesGate {
+  const endpoint = str(parsed.flags, "endpoint")?.trim();
+  if (!endpoint) {
+    errorLog(usageLine);
+    return { ok: false, code: 2 };
+  }
+  // A token must never be passed as a flag.
+  for (const f of HERMES_TOKEN_FLAGS) {
+    if (parsed.flags[f] !== undefined) {
+      errorLog(`The Hermes token must not be passed as a flag. Set the ${HERMES_TOKEN_ENV} environment variable instead.`);
+      return { ok: false, code: 2 };
+    }
+  }
+  if (parsed.flags["allow-network"] !== true) {
+    errorLog("Hermes requires an explicit --allow-network grant. Standalone offline operation is the default.");
+    return { ok: false, code: 2 };
+  }
+  const env = deps.env ?? process.env;
+  const token = env[HERMES_TOKEN_ENV]?.trim();
+  if (!token) {
+    errorLog(`No Hermes token found. Set the ${HERMES_TOKEN_ENV} environment variable (it is never accepted as a flag).`);
+    return { ok: false, code: 2 };
+  }
+  return { ok: true, code: 0, token, endpoint };
+}
+
+/**
+ * `agent hermes-check --endpoint URL` proves an authenticated Hermes API Server
+ * is reachable via `GET /v1/capabilities`. Requires `--allow-network` and the
+ * token env. Never prints the token. Standalone offline operation is unaffected.
+ */
+async function cmdHermesCheck(
+  parsed: Parsed,
+  deps: AgentCliDeps,
+  log: (s: string) => void,
+  errorLog: (s: string) => void,
+): Promise<number> {
+  const usageLine = `Usage: octupie-video-editor agent hermes-check --endpoint URL [--model NAME] --allow-network [--json]  (token via ${HERMES_TOKEN_ENV})`;
+  const gate = hermesGate(parsed, deps, errorLog, usageLine);
+  if (!gate.ok) return gate.code;
+
+  const now = deps.now ?? new Date();
+  const permissionPolicy = createPolicy([
+    { action: "network", grantedBy: "operator-cli", grantedAt: now.toISOString(), reason: "hermes capability check" },
+  ]);
+  const connect = deps.hermesConnect ?? connectHermes;
+
+  try {
+    const connection = await connect({
+      config: {
+        surface: "api",
+        baseUrl: gate.endpoint!,
+        apiKey: gate.token!,
+        ...(str(parsed.flags, "model") ? { model: str(parsed.flags, "model")! } : {}),
+      },
+      policy: permissionPolicy,
+      ...(deps.hermesFetch ? { deps: { fetch: deps.hermesFetch } } : {}),
+      now,
+    });
+    if (parsed.flags["json"] === true) {
+      log(JSON.stringify(connection, null, 2));
+    } else {
+      log(`hermes: official surface reachable at ${connection.baseUrl}`);
+      log(`  platform: ${connection.platform}${connection.model ? " (model " + connection.model + ")" : ""}`);
+      log(`  auth: ${connection.auth.type} (required: ${connection.auth.required})`);
+      log(`  standalonePreserved: ${connection.standalonePreserved}  officialSurface: ${connection.officialSurface}`);
+    }
+    return 0;
+  } catch (err) {
+    // The token never appears in a client error; still, never widen the message.
+    errorLog(`Hermes check failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+}
+
+/**
+ * `agent hermes-orchestrate --endpoint URL --objective TEXT --stage NAME` asks the
+ * Hermes API Server for bounded, DATA-ONLY guidance via `POST /v1/chat/completions`.
+ * Requires `--allow-network` and the token env. Output is data only and never
+ * executed. Never prints the token.
+ */
+async function cmdHermesOrchestrate(
+  parsed: Parsed,
+  deps: AgentCliDeps,
+  log: (s: string) => void,
+  errorLog: (s: string) => void,
+): Promise<number> {
+  const usageLine = `Usage: octupie-video-editor agent hermes-orchestrate --endpoint URL --objective TEXT --stage NAME [--context-file PATH] [--model NAME] --allow-network [--json]  (token via ${HERMES_TOKEN_ENV})`;
+
+  const objective = str(parsed.flags, "objective")?.trim();
+  const stage = str(parsed.flags, "stage")?.trim();
+  if (!objective || !stage) {
+    // Fall through to the shared gate so a bare invocation prints the full usage.
+    if (!str(parsed.flags, "endpoint")) {
+      errorLog(usageLine);
+      return 2;
+    }
+    errorLog(usageLine);
+    return 2;
+  }
+
+  const gate = hermesGate(parsed, deps, errorLog, usageLine);
+  if (!gate.ok) return gate.code;
+
+  let contextText: string | undefined;
+  const contextFile = str(parsed.flags, "context-file");
+  if (contextFile !== undefined) {
+    try {
+      contextText = readFileSync(resolve(process.cwd(), contextFile), "utf8");
+      enforceMaxSize(contextText, MAX_SIZES.transcript, "context");
+    } catch (err) {
+      errorLog(`Could not read context file: ${err instanceof Error ? err.message : String(err)}`);
+      return 2;
+    }
+  }
+
+  const now = deps.now ?? new Date();
+  const permissionPolicy = createPolicy([
+    { action: "network", grantedBy: "operator-cli", grantedAt: now.toISOString(), reason: "hermes orchestration" },
+  ]);
+  const orchestrate = deps.hermesOrchestrate ?? orchestrateHermes;
+
+  try {
+    const result = await orchestrate({
+      config: {
+        surface: "api",
+        baseUrl: gate.endpoint!,
+        apiKey: gate.token!,
+        ...(str(parsed.flags, "model") ? { model: str(parsed.flags, "model")! } : {}),
+      },
+      request: {
+        objective,
+        workflowStage: stage,
+        ...(contextText !== undefined ? { contextText } : {}),
+      },
+      policy: permissionPolicy,
+      ...(deps.hermesFetch ? { deps: { fetch: deps.hermesFetch } } : {}),
+      now,
+    });
+    if (parsed.flags["json"] === true) {
+      log(JSON.stringify(result, null, 2));
+    } else {
+      log(`hermes orchestration (model ${result.model}):`);
+      log(`  summary: ${result.data.summary}`);
+      log(`  recommendedNextStep: ${result.data.recommendedNextStep}`);
+      for (const a of result.data.orderedActions) log(`  action: ${a}`);
+      for (const w of result.data.warnings) log(`  warning: ${w}`);
+      log(`  requiresHumanApproval: ${result.data.requiresHumanApproval}`);
+    }
+    return 0;
+  } catch (err) {
+    errorLog(`Hermes orchestration failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+}
+
 function cmdFeedback(
   flags: Record<string, string | boolean>,
   deps: AgentCliDeps,
@@ -877,6 +1070,10 @@ function usage(log: (s: string) => void): void {
   log("  hook-variants <plan.json> --objective TEXT  Exactly N distinct renderer-ready hook plans.");
   log("      --count N [--provider deterministic|claude] [--transcript FILE | --transcript-text TEXT]");
   log("      [--allow-network] [--out DIR] [--json]");
+  log("  hermes-check --endpoint URL                 Prove an authenticated Hermes API Server (optional).");
+  log(`      [--model NAME] --allow-network [--json]  (token via ${HERMES_TOKEN_ENV}; default ${HERMES_DEFAULT_BASE_URL})`);
+  log("  hermes-orchestrate --endpoint URL           DATA-ONLY guidance from the Hermes API Server (optional).");
+  log("      --objective TEXT --stage NAME [--context-file PATH] [--model NAME] --allow-network [--json]");
   log("  run <brief.json> [--provider id]            Plan (and optionally render) from a brief.");
   log("      [--max-iterations N] [--no-render]");
   log("  feedback --run ID --scope SCOPE --rule TEXT Save an explicit human correction.");

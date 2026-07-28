@@ -100,6 +100,12 @@ npm run agent -- hook-variants my-plan.json --objective "explain customer retent
 
 # Optional restricted Claude text drafting needs explicit network consent
 npm run agent -- hook-variants my-plan.json --objective "explain customer retention" --count 3 --provider claude --allow-network --out output/hooks/customer-retention-claude --json
+
+# Optional official Hermes API check. Token is read only from the environment.
+OCTUPIE_HERMES_API_KEY=your-local-api-server-key npm run agent -- hermes-check --endpoint http://127.0.0.1:8642 --allow-network --json
+
+# Request bounded, data-only orchestration guidance from Hermes
+OCTUPIE_HERMES_API_KEY=your-local-api-server-key npm run agent -- hermes-orchestrate --endpoint http://127.0.0.1:8642 --objective "review the opening" --stage draft-qa --allow-network --json
 ```
 
 ### Local source analysis
@@ -144,6 +150,16 @@ Drive and web discovery return references and rights metadata only. They require
 The optional Claude provider is text-only and requires `--allow-network`. It receives no tools, no MCP servers, no session persistence, and bounded input, output, and runtime. Its response is strict data that passes the same complete-count, edit-plan, media, body-change, and uniqueness gates. It never silently pads a short provider result unless deterministic fallback was explicitly selected by an API caller.
 
 Limitations: variants are renderer-ready plans, not approved deliveries. Render each requested opening, preserve the full spoken hook phrase and natural tail, then run phone-scale caption, face-coverage, audio, and manual editorial QA before publishing.
+
+### Optional official Hermes orchestration
+
+Hermes is optional. The editor remains standalone and offline by default. It never reads Hermes profile files, `.env`, `auth.json`, OAuth credentials, private Python modules, or internal databases.
+
+The integration uses the documented authenticated Hermes API Server only. Enable that server separately with `API_SERVER_ENABLED=true` and a strong `API_SERVER_KEY`, then restart the Hermes gateway. The documented local endpoint is `http://127.0.0.1:8642`. The editor receives the matching token only through `OCTUPIE_HERMES_API_KEY`. Tokens in URLs and CLI flags are rejected and never printed.
+
+Both `agent hermes-check` and `agent hermes-orchestrate` require `--allow-network`. Remote endpoints require HTTPS. Redirects, oversized responses, malformed capabilities, non-Hermes identity, malformed chat envelopes, and unvalidated orchestration data are rejected. Before any orchestration context is sent, the adapter validates `GET /v1/capabilities` as the official Hermes API Server. Orchestration output is bounded JSON data only. It is never executed, rendered, published, or treated as approval.
+
+Without an endpoint, token, or network grant, the integration is unavailable and the existing analysis, planning, rendering, QA, discovery, and deterministic hook workflows continue unchanged.
 
 A brief is JSON validated by `src/agent/brief.ts` (AgentBrief v1): objective,
 audience, platform, creator/style, preset, desired duration, relative source

@@ -221,6 +221,35 @@ export function hookVariantProductionProbe(claudeBin: string, runner: ExecFn = e
   };
 }
 
+/**
+ * Offline probe for optional Hermes integration. It NEVER hits the network: it
+ * reports based only on whether an endpoint and a token are configured. Without
+ * both it is `unavailable` (standalone offline default in effect). With both it
+ * is `configured` (present but unproven). It never reports `verified`; only a
+ * passed acceptance gate can, and the registry downgrades any unproven claim
+ * regardless. No private Hermes config or credential store is ever read.
+ */
+export function hermesIntegrationProbe(opts: { endpoint?: string; tokenPresent?: boolean } = {}): CapabilityProbe {
+  return async () => {
+    const endpoint = opts.endpoint?.trim();
+    const hasEndpoint = endpoint !== undefined && endpoint.length > 0;
+    const hasToken = opts.tokenPresent === true;
+    if (hasEndpoint && hasToken) {
+      return {
+        status: "configured",
+        detail:
+          `A Hermes API endpoint and token are configured; the official-surface and standalone-preserved ` +
+          `gates are not yet passed with executable evidence. Standalone offline operation remains the default.`,
+      };
+    }
+    return {
+      status: "unavailable",
+      detail:
+        "No Hermes endpoint and/or token configured; standalone offline operation is the default and Hermes is not consulted.",
+    };
+  };
+}
+
 export interface CapabilityProbeDeps {
   pythonExe?: string;
   runner?: ExecFn;
@@ -232,6 +261,10 @@ export interface CapabilityProbeDeps {
   driveConfigured?: boolean;
   /** Whether an explicit web adapter is configured (for the discovery probe). */
   webConfigured?: boolean;
+  /** Optional Hermes endpoint for the integration probe. Defaults to `OCTUPIE_HERMES_ENDPOINT`. */
+  hermesEndpoint?: string;
+  /** Whether the Hermes token env is present. Defaults to `OCTUPIE_HERMES_API_KEY` being set. */
+  hermesTokenPresent?: boolean;
 }
 
 /** Build the real per-capability probes keyed by capability id. */
@@ -240,6 +273,9 @@ export function buildCapabilityProbes(deps: CapabilityProbeDeps = {}): Record<st
   const runner = deps.runner ?? execProcess;
   const claudeBin = deps.claudeBin ?? claudeBinary();
   const assetRootDir = deps.assetRootDir ?? process.env.OVE_ASSET_ROOT?.trim() ?? "assets";
+  const hermesEndpoint = deps.hermesEndpoint ?? process.env.OCTUPIE_HERMES_ENDPOINT?.trim();
+  const hermesTokenPresent =
+    deps.hermesTokenPresent ?? (process.env.OCTUPIE_HERMES_API_KEY?.trim() ?? "").length > 0;
   return {
     "transcription-analysis": transcriptionAnalysisProbe(pythonExe, runner),
     "semantic-video-understanding": semanticVisionProbe(claudeBin, runner),
@@ -249,5 +285,9 @@ export function buildCapabilityProbes(deps: CapabilityProbeDeps = {}): Record<st
       ...(deps.webConfigured !== undefined ? { webConfigured: deps.webConfigured } : {}),
     }),
     "hook-variant-production": hookVariantProductionProbe(claudeBin, runner),
+    "hermes-integration": hermesIntegrationProbe({
+      ...(hermesEndpoint !== undefined ? { endpoint: hermesEndpoint } : {}),
+      tokenPresent: hermesTokenPresent,
+    }),
   };
 }
