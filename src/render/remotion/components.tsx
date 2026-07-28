@@ -149,6 +149,12 @@ function renderEmphasis(text: string, emphasis: string | undefined, accent: stri
   );
 }
 
+export function isCaptionCardActive(frame: number, card: CaptionCard, fps: number): boolean {
+  const startF = card.start * fps;
+  const endF = card.end * fps;
+  return frame >= startF && frame < endF;
+}
+
 /** Caption card with a restrained fade+lift. Static enough to read on onset. */
 export const KineticCaption: React.FC<{
   card: CaptionCard;
@@ -162,8 +168,7 @@ export const KineticCaption: React.FC<{
 }> = ({ card, fps, bandY, size, color, emphasis, font, canvasWidth }) => {
   const frame = useCurrentFrame();
   const startF = card.start * fps;
-  const endF = card.end * fps;
-  if (frame < startF || frame > endF + 2) return null;
+  if (!isCaptionCardActive(frame, card, fps)) return null;
   const p = ease(frame, startF, startF + 4);
   return (
     <div
