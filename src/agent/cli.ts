@@ -34,6 +34,9 @@ import { loadAcceptanceManifest } from "../capabilities/acceptance.js";
 import { createPolicy, PERMISSION_ACTIONS } from "../permissions/policy.js";
 import { analyzeSource, defaultAnalysisOutDir } from "../analysis/analyze.js";
 import { understandSource, isUnderstandProviderId, UNDERSTAND_PROVIDERS } from "../understanding/understand.js";
+import { parseEditPlan } from "../schema/editPlan.js";
+import { critiqueRenderedMaster } from "../critique/critique.js";
+import { reviewPlan } from "../critique/review.js";
 
 export interface AgentCliDeps {
   log?: (s: string) => void;
@@ -54,6 +57,10 @@ export interface AgentCliDeps {
   analyze?: typeof analyzeSource;
   /** Multimodal understanding override (tests). Defaults to the real orchestrator. */
   understand?: typeof understandSource;
+  /** Rendered-draft critique override (tests). Defaults to the real orchestrator. */
+  critique?: typeof critiqueRenderedMaster;
+  /** Bounded review-loop override (tests). Defaults to the real wiring. */
+  review?: typeof reviewPlan;
 }
 
 interface Parsed {
@@ -103,6 +110,10 @@ export async function runAgentCli(argv: string[], deps: AgentCliDeps = {}): Prom
       return cmdAnalyze({ _, flags }, deps, log, errorLog);
     case "understand":
       return cmdUnderstand({ _, flags }, deps, log, errorLog);
+    case "critique":
+      return cmdCritique({ _, flags }, deps, log, errorLog);
+    case "review":
+      return cmdReview({ _, flags }, deps, log, errorLog);
     case "run":
       return cmdRun({ _, flags }, deps, home, log, errorLog);
     case "feedback":
@@ -412,6 +423,172 @@ async function cmdUnderstand(
   }
 }
 
+/**
+ * `agent critique <plan.json> <master.mp4> --provider claude` samples the exact
+ * already-rendered master, hands the sampled JPEG frames and plan intent to the
+ * restricted Claude critique provider, and writes a validated, frame-anchored
+ * critique artifact under the output root. Both `--allow-network` and
+ * `--allow-media-upload` are required; without them nothing is sampled or spawned.
+ * It never re-renders and never replaces human editorial approval.
+ */
+async function cmdCritique(
+  parsed: Parsed,
+  deps: AgentCliDeps,
+  log: (s: string) => void,
+  errorLog: (s: string) => void,
+): Promise<number> {
+  const planPath = parsed._[0];
+  const masterPath = parsed._[1];
+  if (!planPath || !masterPath) {
+    errorLog("Usage: octupie-video-editor agent critique <plan.json> <master.mp4> --provider claude --allow-network --allow-media-upload [--out FILE] [--json]");
+    return 2;
+  }
+  if (str(parsed.flags, "provider") !== "claude") {
+    errorLog("--provider is required and must be: claude");
+    return 2;
+  }
+  if (parsed.flags["allow-network"] !== true || parsed.flags["allow-media-upload"] !== true) {
+    errorLog("Remote critique requires both --allow-network and --allow-media-upload.");
+    return 2;
+  }
+
+  let plan;
+  try {
+    const raw = JSON.parse(readFileSync(resolve(process.cwd(), planPath), "utf8"));
+    const p = parseEditPlan(raw);
+    if (!p.ok || !p.plan) {
+      errorLog(`Invalid plan: ${planPath}`);
+      for (const e of p.errors) errorLog(`  - ${e}`);
+      return 2;
+    }
+    plan = p.plan;
+  } catch (err) {
+    errorLog(`Could not read plan: ${err instanceof Error ? err.message : String(err)}`);
+    return 2;
+  }
+
+  const grantedAt = (deps.now ?? new Date()).toISOString();
+  const permissionPolicy = createPolicy([
+    { action: "network", grantedBy: "operator-cli", grantedAt, reason: "agent critique" },
+    { action: "media-upload", grantedBy: "operator-cli", grantedAt, reason: "agent critique sampled frames" },
+  ]);
+  const critique = deps.critique ?? critiqueRenderedMaster;
+
+  try {
+    const res = await critique({
+      plan,
+      masterPath,
+      permissionPolicy,
+      ...(str(parsed.flags, "out") ? { outFile: str(parsed.flags, "out")! } : {}),
+      ...(deps.now ? { now: deps.now } : {}),
+    });
+    const c = res.critique;
+    const blockers = c.notes.filter((n) => n.severity === "blocker").length;
+    if (parsed.flags["json"] === true) {
+      log(JSON.stringify({
+        critiquePath: res.critiquePath,
+        master: c.master,
+        durationSeconds: res.durationSeconds,
+        frames: res.frameCount,
+        provider: c.provider,
+        approved: c.approved,
+        blockers,
+        notes: c.notes.length,
+      }, null, 2));
+    } else {
+      log(`critique: ${res.critiquePath}`);
+      log(`provider: ${c.provider.id} (${c.provider.model})`);
+      log(`approved: ${c.approved}, blockers: ${blockers}, notes: ${c.notes.length}, frames: ${res.frameCount}`);
+      log(`summary: ${c.summary}`);
+    }
+    return 0;
+  } catch (err) {
+    errorLog(`Critique failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+}
+
+/**
+ * `agent review <plan.json>` runs the bounded revision loop: render the exact
+ * plan, critique the exact rendered master, and (if unapproved) ask for a
+ * complete replacement plan that is re-validated against the edit-plan schema
+ * before re-rendering. The loop is hard-capped by `--max-rounds` and escalates to
+ * a human at the cap or on any invalid proposal rather than looping. Both
+ * `--allow-network` and `--allow-media-upload` are required. Human sign-off is
+ * never replaced.
+ */
+async function cmdReview(
+  parsed: Parsed,
+  deps: AgentCliDeps,
+  log: (s: string) => void,
+  errorLog: (s: string) => void,
+): Promise<number> {
+  const planPath = parsed._[0];
+  if (!planPath) {
+    errorLog("Usage: octupie-video-editor agent review <plan.json> --allow-network --allow-media-upload [--max-rounds N] [--json]");
+    return 2;
+  }
+  if (parsed.flags["allow-network"] !== true || parsed.flags["allow-media-upload"] !== true) {
+    errorLog("Bounded review requires both --allow-network and --allow-media-upload.");
+    return 2;
+  }
+
+  let plan;
+  try {
+    const raw = JSON.parse(readFileSync(resolve(process.cwd(), planPath), "utf8"));
+    const p = parseEditPlan(raw);
+    if (!p.ok || !p.plan) {
+      errorLog(`Invalid plan: ${planPath}`);
+      for (const e of p.errors) errorLog(`  - ${e}`);
+      return 2;
+    }
+    plan = p.plan;
+  } catch (err) {
+    errorLog(`Could not read plan: ${err instanceof Error ? err.message : String(err)}`);
+    return 2;
+  }
+
+  const maxRaw = str(parsed.flags, "max-rounds");
+  const maxRounds = maxRaw !== undefined ? Number(maxRaw) : 2;
+  if (!Number.isFinite(maxRounds)) {
+    errorLog(`--max-rounds must be a number, got "${maxRaw}".`);
+    return 2;
+  }
+
+  const grantedAt = (deps.now ?? new Date()).toISOString();
+  const permissionPolicy = createPolicy([
+    { action: "network", grantedBy: "operator-cli", grantedAt, reason: "agent review" },
+    { action: "media-upload", grantedBy: "operator-cli", grantedAt, reason: "agent review sampled frames" },
+  ]);
+  const review = deps.review ?? reviewPlan;
+
+  try {
+    const res = await review({
+      plan,
+      maxRounds,
+      permissionPolicy,
+      ...(deps.now ? { now: deps.now } : {}),
+    });
+    if (parsed.flags["json"] === true) {
+      log(JSON.stringify({
+        approved: res.approved,
+        humanEscalation: res.humanEscalation,
+        rounds: res.rounds,
+        reason: res.reason,
+        finalTitle: res.finalPlan.title,
+      }, null, 2));
+    } else {
+      log(`review: ${res.approved ? "APPROVED" : "NOT APPROVED"} after ${res.rounds} round(s)`);
+      log(`human escalation: ${res.humanEscalation}`);
+      log(`reason: ${res.reason}`);
+    }
+    return 0;
+  } catch (err) {
+    errorLog(`Review failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+}
+
 function cmdFeedback(
   flags: Record<string, string | boolean>,
   deps: AgentCliDeps,
@@ -499,6 +676,10 @@ function usage(log: (s: string) => void): void {
   log("      [--language L] [--allow-model-download] [--frames] [--json]");
   log("  understand <analysis.json> --provider claude Multimodal semantic interpretation of sampled frames.");
   log("      [--out FILE] [--json]");
+  log("  critique <plan.json> <master.mp4>           Frame-anchored critique of the rendered master.");
+  log("      --provider claude --allow-network --allow-media-upload [--out FILE] [--json]");
+  log("  review <plan.json>                          Bounded render/critique/revise loop; escalates at the cap.");
+  log("      --allow-network --allow-media-upload [--max-rounds N] [--json]");
   log("  run <brief.json> [--provider id]            Plan (and optionally render) from a brief.");
   log("      [--max-iterations N] [--no-render]");
   log("  feedback --run ID --scope SCOPE --rule TEXT Save an explicit human correction.");

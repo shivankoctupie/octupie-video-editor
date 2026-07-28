@@ -90,6 +90,35 @@ export function semanticVisionProbe(claudeBin: string, runner: ExecFn = execProc
 }
 
 /**
+ * Real probe for rendered-draft critique and bounded revision. The only backing
+ * is the restricted Claude Code critique adapter, which needs the standalone
+ * `claude` binary. `configured` when `claude` responds to `--version`;
+ * `unavailable` otherwise. Never `verified`: the frame-notes and bounded-rounds
+ * gates need real end-to-end evidence that a unit test does not provide (the
+ * registry downgrades any unproven `verified` claim regardless).
+ */
+export function draftCritiqueRevisionProbe(claudeBin: string, runner: ExecFn = execProcess): CapabilityProbe {
+  return async () => {
+    try {
+      const res = await runner(claudeBin, ["--version"], { timeoutMs: CLAUDE_VERSION_TIMEOUT_MS });
+      if (res.spawnError) {
+        return { status: "unavailable", detail: `Draft-critique provider unavailable: '${claudeBin}' not runnable (${res.spawnError}).` };
+      }
+      if (res.code === 0) {
+        return {
+          status: "configured",
+          detail:
+            "Restricted Claude Code critique provider is available; the frame-notes and bounded-rounds gates are not yet passed with real-media evidence.",
+        };
+      }
+      return { status: "unavailable", detail: `Draft-critique provider unavailable ('${claudeBin}' exit ${res.code}).` };
+    } catch (err) {
+      return { status: "unavailable", detail: `Draft-critique probe error: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  };
+}
+
+/**
  * Probe for optional speaker diarization (a sub-gate of transcription-analysis).
  * `configured` when the local `pyannote.audio` library imports; `unavailable`
  * otherwise. Reported as capability detail; it never flips a gate green, which
@@ -137,5 +166,6 @@ export function buildCapabilityProbes(deps: CapabilityProbeDeps = {}): Record<st
   return {
     "transcription-analysis": transcriptionAnalysisProbe(pythonExe, runner),
     "semantic-video-understanding": semanticVisionProbe(claudeBin, runner),
+    "draft-critique-revision": draftCritiqueRevisionProbe(claudeBin, runner),
   };
 }

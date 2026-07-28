@@ -82,6 +82,12 @@ OVE_ASSET_ROOT=/path/to/media npm run agent -- analyze source/clip.mov --languag
 
 # Interpret validated sampled frames with restricted Claude vision
 npm run agent -- understand output/analysis/clip/analysis.json --provider claude --allow-network --allow-media-upload --json
+
+# Critique an already-rendered master with frame-anchored notes
+npm run agent -- critique my-plan.json output/neutral-founder-reel.mp4 --provider claude --allow-network --allow-media-upload --json
+
+# Bounded render/critique/revise loop that escalates to a human at the cap
+npm run agent -- review my-plan.json --allow-network --allow-media-upload --max-rounds 2 --json
 ```
 
 ### Local source analysis
@@ -102,6 +108,16 @@ The local editorial pass records FFmpeg silence regions, lexical fillers, conser
 A checked-in pyannote bridge and provider probe are available for real speaker diarization. This optional path requires the packages in `python/requirements-diarization.txt`, an accepted pyannote model, and an operator-provided Hugging Face token. The token stays in the environment and is never placed in process arguments or logs. Diarization remains reported as unavailable until the real runtime and model are present. No speaker labels are invented.
 
 The Python executable and model can be changed with `OVE_PYTHON`, `OVE_WHISPER_MODEL`, `OVE_WHISPER_DEVICE`, and `OVE_WHISPER_COMPUTE`. Named models are cached or local-only by default. Pass `--allow-model-download` explicitly when a missing named model may be downloaded. A local model path runs offline.
+
+### Rendered-draft critique and bounded revision
+
+`agent critique` and `agent review` judge the actually-rendered master, not just the plan. Both are separate, explicit remote steps and both require `--allow-network` and `--allow-media-upload`; with no grant the engine stays offline and denies the action.
+
+`agent critique <plan.json> <master.mp4>` resolves the master under the output root with lexical and canonical-path containment (a symlink that escapes the root is rejected, and the master must be a regular file), samples it with FFmpeg into a separate run directory so the master is never overwritten, and reads its true duration with FFprobe. It cleans only files whose names exactly match the generated frame pattern, uses argument arrays with `shell:false`, and bounds runtime and output. The sampled JPEG frames and the plan intent go to a restricted Claude CLI process: Read-only tools, no saved session, an empty strict MCP configuration, exactly one granted frame directory, the prompt on stdin, and JPEG signatures checked before upload. Each returned note carries a source time, a severity (`info`, `suggest`, `blocker`), a category, concise text, an optional evidence frame, and optional suggested plan changes that are DATA only. Every note time is validated against the real master duration, cited evidence frames must match the frames that were actually supplied, and the engine, not the model, stamps identity, provider, timestamp, and master path. The result is written under the output root.
+
+`agent review <plan.json>` runs a bounded loop: it renders the exact plan, critiques the exact rendered master, and stops as soon as the critique is approved with no outstanding blocker. Otherwise it asks a provider for one complete replacement plan expressed as DATA, re-validates it against the same strict edit-plan schema (and, when a brief is present, against the declared-media constraint), and only then re-renders. The loop is hard-capped by `--max-rounds`; at the cap, or when a proposal is invalid, it halts and returns a human-escalation result rather than looping unbounded or accepting an invalid plan. Nothing a provider returns is executed; the engine only validates data.
+
+Limitations: this is assistive review, not sign-off. A `configured` provider means the Claude CLI is present, never that the capability is verified; the `draft-critique-revision` acceptance gates flip to passed only with real end-to-end evidence, which unit tests do not provide. Critique and bounded revision do not replace human editorial approval of the final master.
 
 A brief is JSON validated by `src/agent/brief.ts` (AgentBrief v1): objective,
 audience, platform, creator/style, preset, desired duration, relative source

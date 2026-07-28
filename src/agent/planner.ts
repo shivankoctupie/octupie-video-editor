@@ -189,7 +189,7 @@ export async function runPlannerLoop(input: PlannerLoopInput): Promise<PlannerLo
   );
 }
 
-function validatePlanMedia(plan: EditPlan, brief: AgentBrief): string[] {
+export function validatePlanMedia(plan: EditPlan, brief: AgentBrief): string[] {
   const errors: string[] = [];
   const declaredById = new Map(brief.sourceClips.map((clip) => [clip.id, clip.path]));
   const declaredPaths = new Set(brief.sourceClips.map((clip) => clip.path));
