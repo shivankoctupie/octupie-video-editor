@@ -88,6 +88,12 @@ npm run agent -- critique my-plan.json output/neutral-founder-reel.mp4 --provide
 
 # Bounded render/critique/revise loop that escalates to a human at the cap
 npm run agent -- review my-plan.json --allow-network --allow-media-upload --max-rounds 2 --json
+
+# Offline local discovery returns only assets with validated rights sidecars
+npm run agent -- discover-assets --intent "2026 team workshop" --source local --asset-root /path/to/assets --max-results 20 --json
+
+# Drive and web reference discovery is opt-in and needs configured external adapters
+npm run agent -- discover-assets --intent "official product launch" --source drive,web --allow-network --json
 ```
 
 ### Local source analysis
@@ -118,6 +124,12 @@ The Python executable and model can be changed with `OVE_PYTHON`, `OVE_WHISPER_M
 `agent review <plan.json>` runs a bounded loop: it renders the exact plan, critiques the exact rendered master, and stops as soon as the critique is approved with no outstanding blocker. Otherwise it asks a provider for one complete replacement plan expressed as DATA, re-validates it against the same strict edit-plan schema (and, when a brief is present, against the declared-media constraint), and only then re-renders. The loop is hard-capped by `--max-rounds`; at the cap, or when a proposal is invalid, it halts and returns a human-escalation result rather than looping unbounded or accepting an invalid plan. Nothing a provider returns is executed; the engine only validates data.
 
 Limitations: this is assistive review, not sign-off. A `configured` provider means the Claude CLI is present, never that the capability is verified; the `draft-critique-revision` acceptance gates flip to passed only with real end-to-end evidence, which unit tests do not provide. Critique and bounded revision do not replace human editorial approval of the final master.
+
+### Rights-safe asset discovery
+
+`agent discover-assets` searches an explicit local asset root offline. It returns a local file only when a strict `<asset>.rights.json` sidecar states a concrete license, attribution requirements, provenance, and either `permissive` or `local-owner` rights. Missing, invalid, unknown, and restricted rights are rejected. Paths are portable and contained by lexical and canonical checks, including symlink and junction escapes. Traversal, result counts, media extensions, and ordering are bounded and deterministic.
+
+Drive and web discovery return references and rights metadata only. They require `--allow-network` and a separately configured official external adapter. Discovery never downloads media. Any future byte materialization uses a distinct method that also requires explicit `media-upload` permission. Public availability, an official page, or a filename is not reuse permission. A human must still verify the license and attribution before publishing.
 
 A brief is JSON validated by `src/agent/brief.ts` (AgentBrief v1): objective,
 audience, platform, creator/style, preset, desired duration, relative source

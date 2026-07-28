@@ -37,6 +37,8 @@ import { understandSource, isUnderstandProviderId, UNDERSTAND_PROVIDERS } from "
 import { parseEditPlan } from "../schema/editPlan.js";
 import { critiqueRenderedMaster } from "../critique/critique.js";
 import { reviewPlan } from "../critique/review.js";
+import { discoverAssets } from "../discovery/discover.js";
+import { ASSET_SOURCE_KINDS, type AssetSourceKind } from "../discovery/schemas.js";
 
 export interface AgentCliDeps {
   log?: (s: string) => void;
@@ -61,6 +63,8 @@ export interface AgentCliDeps {
   critique?: typeof critiqueRenderedMaster;
   /** Bounded review-loop override (tests). Defaults to the real wiring. */
   review?: typeof reviewPlan;
+  /** Rights-safe asset discovery override (tests). Defaults to local discovery and optional providers. */
+  discoverAssets?: typeof discoverAssets;
 }
 
 interface Parsed {
@@ -114,6 +118,8 @@ export async function runAgentCli(argv: string[], deps: AgentCliDeps = {}): Prom
       return cmdCritique({ _, flags }, deps, log, errorLog);
     case "review":
       return cmdReview({ _, flags }, deps, log, errorLog);
+    case "discover-assets":
+      return cmdDiscoverAssets({ _, flags }, deps, log, errorLog);
     case "run":
       return cmdRun({ _, flags }, deps, home, log, errorLog);
     case "feedback":
@@ -589,6 +595,74 @@ async function cmdReview(
   }
 }
 
+/** Rights-cleared reference discovery. Local mode is offline; remote sources need an explicit network grant. */
+async function cmdDiscoverAssets(
+  parsed: Parsed,
+  deps: AgentCliDeps,
+  log: (s: string) => void,
+  errorLog: (s: string) => void,
+): Promise<number> {
+  const intent = str(parsed.flags, "intent")?.trim();
+  if (!intent) {
+    errorLog("Usage: octupie-video-editor agent discover-assets --intent TEXT [--source local,drive,web] [--asset-root PATH] [--max-results N] [--allow-network] [--json]");
+    return 2;
+  }
+
+  const sourceRaw = str(parsed.flags, "source") ?? "local";
+  const sources = sourceRaw.split(",").map((s) => s.trim()).filter(Boolean);
+  const invalid = sources.filter((s) => !(ASSET_SOURCE_KINDS as readonly string[]).includes(s));
+  if (sources.length === 0 || invalid.length > 0) {
+    errorLog(`--source must contain only: ${ASSET_SOURCE_KINDS.join(", ")}.`);
+    return 2;
+  }
+  const typedSources = sources as AssetSourceKind[];
+  const wantsRemote = typedSources.some((s) => s === "drive" || s === "web");
+  if (wantsRemote && parsed.flags["allow-network"] !== true) {
+    errorLog("Drive and web discovery require --allow-network. Local discovery remains offline.");
+    return 2;
+  }
+
+  const maxRaw = str(parsed.flags, "max-results");
+  const maxResults = maxRaw === undefined ? 20 : Number(maxRaw);
+  if (!Number.isInteger(maxResults) || maxResults < 1 || maxResults > 200) {
+    errorLog("--max-results must be an integer from 1 to 200.");
+    return 2;
+  }
+
+  const now = deps.now ?? new Date();
+  const permissionPolicy = createPolicy(
+    wantsRemote
+      ? [{ action: "network", grantedBy: "operator-cli", grantedAt: now.toISOString(), reason: "asset reference discovery" }]
+      : [],
+  );
+  const assetRoot = resolve(process.cwd(), str(parsed.flags, "asset-root") ?? process.env.OVE_ASSET_ROOT ?? "assets");
+  const discover = deps.discoverAssets ?? discoverAssets;
+
+  try {
+    const result = await discover({
+      query: { intent, sources: typedSources, maxResults },
+      assetRoot,
+      permissionPolicy,
+      now,
+    });
+    if (parsed.flags["json"] === true) {
+      log(JSON.stringify(result, null, 2));
+    } else {
+      log(`asset discovery: ${result.candidates.length} rights-cleared candidate(s)`);
+      for (const candidate of result.candidates) {
+        log(`  ${candidate.source.padEnd(5)} ${candidate.relevance.toFixed(2)} ${candidate.ref} [${candidate.license.id}]`);
+      }
+      for (const diagnostic of result.diagnostics) {
+        log(`  ${diagnostic.level.toUpperCase()} ${diagnostic.source}: ${diagnostic.message}`);
+      }
+    }
+    return result.diagnostics.some((d) => d.level === "error") ? 1 : 0;
+  } catch (err) {
+    errorLog(`Asset discovery failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+}
+
 function cmdFeedback(
   flags: Record<string, string | boolean>,
   deps: AgentCliDeps,
@@ -680,6 +754,8 @@ function usage(log: (s: string) => void): void {
   log("      --provider claude --allow-network --allow-media-upload [--out FILE] [--json]");
   log("  review <plan.json>                          Bounded render/critique/revise loop; escalates at the cap.");
   log("      --allow-network --allow-media-upload [--max-rounds N] [--json]");
+  log("  discover-assets --intent TEXT               Rights-cleared local, Drive, or web references.");
+  log("      [--source local,drive,web] [--asset-root PATH] [--max-results N] [--allow-network] [--json]");
   log("  run <brief.json> [--provider id]            Plan (and optionally render) from a brief.");
   log("      [--max-iterations N] [--no-render]");
   log("  feedback --run ID --scope SCOPE --rule TEXT Save an explicit human correction.");

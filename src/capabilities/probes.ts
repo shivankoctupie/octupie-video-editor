@@ -10,6 +10,8 @@
  * semantic-video-understanding, stays `unavailable` until a true provider exists.
  */
 
+import { statSync } from "node:fs";
+import { resolve } from "node:path";
 import { execProcess, type ExecFn } from "../agent/exec.js";
 import { claudeBinary } from "../agent/providers/claude.js";
 import type { CapabilityProbe } from "./types.js";
@@ -151,11 +153,58 @@ export function diarizationProbe(pythonExe: string, runner: ExecFn = execProcess
   };
 }
 
+/**
+ * Real probe for rights-safe asset discovery. Reports `configured` when a real
+ * local provider is usable (the asset root exists as a directory) OR an
+ * explicitly configured remote adapter (Drive or web) is present; `unavailable`
+ * otherwise. Never `verified`: the `local` and `rights-metadata` gates need
+ * executable end-to-end evidence that a unit test does not provide (the registry
+ * downgrades any unproven `verified` claim regardless).
+ */
+export function assetDiscoveryProbe(
+  assetRootDir: string,
+  opts: { driveConfigured?: boolean; webConfigured?: boolean; dirExists?: (p: string) => boolean } = {},
+): CapabilityProbe {
+  const dirExists =
+    opts.dirExists ??
+    ((p: string) => {
+      try {
+        return statSync(p).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+  return async () => {
+    const localUsable = dirExists(resolve(assetRootDir));
+    const remoteConfigured = opts.driveConfigured === true || opts.webConfigured === true;
+    if (localUsable || remoteConfigured) {
+      const parts: string[] = [];
+      if (localUsable) parts.push(`local asset root '${assetRootDir}' is present`);
+      if (opts.driveConfigured) parts.push("a Drive adapter is configured");
+      if (opts.webConfigured) parts.push("a web adapter is configured");
+      return {
+        status: "configured",
+        detail: `${parts.join("; ")}; the local and rights-metadata gates are not yet passed with executable evidence.`,
+      };
+    }
+    return {
+      status: "unavailable",
+      detail: `No usable local asset root at '${assetRootDir}' and no configured remote adapter.`,
+    };
+  };
+}
+
 export interface CapabilityProbeDeps {
   pythonExe?: string;
   runner?: ExecFn;
   /** Binary for the restricted vision provider. Defaults to the configured `claude`. */
   claudeBin?: string;
+  /** Absolute asset root for the local discovery probe. Defaults to `OVE_ASSET_ROOT` or `assets`. */
+  assetRootDir?: string;
+  /** Whether an explicit Drive adapter is configured (for the discovery probe). */
+  driveConfigured?: boolean;
+  /** Whether an explicit web adapter is configured (for the discovery probe). */
+  webConfigured?: boolean;
 }
 
 /** Build the real per-capability probes keyed by capability id. */
@@ -163,9 +212,14 @@ export function buildCapabilityProbes(deps: CapabilityProbeDeps = {}): Record<st
   const pythonExe = deps.pythonExe ?? process.env.OVE_PYTHON?.trim() ?? "python";
   const runner = deps.runner ?? execProcess;
   const claudeBin = deps.claudeBin ?? claudeBinary();
+  const assetRootDir = deps.assetRootDir ?? process.env.OVE_ASSET_ROOT?.trim() ?? "assets";
   return {
     "transcription-analysis": transcriptionAnalysisProbe(pythonExe, runner),
     "semantic-video-understanding": semanticVisionProbe(claudeBin, runner),
     "draft-critique-revision": draftCritiqueRevisionProbe(claudeBin, runner),
+    "asset-discovery": assetDiscoveryProbe(assetRootDir, {
+      ...(deps.driveConfigured !== undefined ? { driveConfigured: deps.driveConfigured } : {}),
+      ...(deps.webConfigured !== undefined ? { webConfigured: deps.webConfigured } : {}),
+    }),
   };
 }
