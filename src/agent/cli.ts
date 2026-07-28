@@ -31,8 +31,9 @@ import { diagnoseCapabilities } from "../capabilities/registry.js";
 import type { CapabilityProbe } from "../capabilities/types.js";
 import { buildCapabilityProbes } from "../capabilities/probes.js";
 import { loadAcceptanceManifest } from "../capabilities/acceptance.js";
-import { PERMISSION_ACTIONS } from "../permissions/policy.js";
+import { createPolicy, PERMISSION_ACTIONS } from "../permissions/policy.js";
 import { analyzeSource, defaultAnalysisOutDir } from "../analysis/analyze.js";
+import { understandSource, isUnderstandProviderId, UNDERSTAND_PROVIDERS } from "../understanding/understand.js";
 
 export interface AgentCliDeps {
   log?: (s: string) => void;
@@ -51,6 +52,8 @@ export interface AgentCliDeps {
   capabilityProbes?: Record<string, CapabilityProbe>;
   /** Source analyzer override (tests). Defaults to the real local analyzer. */
   analyze?: typeof analyzeSource;
+  /** Multimodal understanding override (tests). Defaults to the real orchestrator. */
+  understand?: typeof understandSource;
 }
 
 interface Parsed {
@@ -98,6 +101,8 @@ export async function runAgentCli(argv: string[], deps: AgentCliDeps = {}): Prom
       return cmdCapabilities(flags, deps, log);
     case "analyze":
       return cmdAnalyze({ _, flags }, deps, log, errorLog);
+    case "understand":
+      return cmdUnderstand({ _, flags }, deps, log, errorLog);
     case "run":
       return cmdRun({ _, flags }, deps, home, log, errorLog);
     case "feedback":
@@ -337,6 +342,76 @@ async function cmdAnalyze(
   }
 }
 
+/**
+ * `agent understand <analysis.json> --provider claude` runs the restricted
+ * multimodal interpretation: it reads an already-validated source-analysis
+ * artifact plus its sampled frames and returns validated semantic findings
+ * (facial expressions, crew prompts, weak takes, product proof, visual glitches,
+ * B-roll relevance, hook moments). The analysis file and every frame must be
+ * contained under the project output root (or `OVE_ANALYSIS_ROOT`); the output
+ * stays under that root. It is the only path that hands frames to a model, and it
+ * validates every result before writing.
+ */
+async function cmdUnderstand(
+  parsed: Parsed,
+  deps: AgentCliDeps,
+  log: (s: string) => void,
+  errorLog: (s: string) => void,
+): Promise<number> {
+  const analysisPath = parsed._[0];
+  if (!analysisPath) {
+    errorLog("Usage: octupie-video-editor agent understand <analysis.json> --provider claude --allow-network --allow-media-upload [--out FILE] [--json]");
+    return 2;
+  }
+  const providerId = str(parsed.flags, "provider");
+  if (!providerId || !isUnderstandProviderId(providerId)) {
+    errorLog(`--provider is required and must be one of: ${UNDERSTAND_PROVIDERS.join(", ")}`);
+    return 2;
+  }
+  if (parsed.flags["allow-network"] !== true || parsed.flags["allow-media-upload"] !== true) {
+    errorLog("Remote understanding requires both --allow-network and --allow-media-upload.");
+    return 2;
+  }
+  const grantedAt = (deps.now ?? new Date()).toISOString();
+  const permissionPolicy = createPolicy([
+    { action: "network", grantedBy: "operator-cli", grantedAt, reason: "agent understand" },
+    { action: "media-upload", grantedBy: "operator-cli", grantedAt, reason: "agent understand sampled frames" },
+  ]);
+  const understand = deps.understand ?? understandSource;
+
+  try {
+    const res = await understand({
+      analysisPath,
+      providerId,
+      permissionPolicy,
+      ...(str(parsed.flags, "out") ? { outFile: str(parsed.flags, "out")! } : {}),
+      ...(deps.now ? { now: deps.now } : {}),
+    });
+    const u = res.understanding;
+    if (parsed.flags["json"] === true) {
+      log(JSON.stringify({
+        understandingPath: res.understandingPath,
+        frameDir: res.frameDir,
+        frames: res.frameCount,
+        provider: u.provider,
+        durationSeconds: u.durationSeconds,
+        findings: u.findings.length,
+        segments: u.segments.length,
+        limitations: u.limitations.length,
+      }, null, 2));
+    } else {
+      log(`understanding: ${res.understandingPath}`);
+      log(`provider: ${u.provider.id} (${u.provider.model})`);
+      log(`frames: ${res.frameCount}, findings: ${u.findings.length}, segments: ${u.segments.length}`);
+      log(`summary: ${u.summary}`);
+    }
+    return 0;
+  } catch (err) {
+    errorLog(`Understand failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+}
+
 function cmdFeedback(
   flags: Record<string, string | boolean>,
   deps: AgentCliDeps,
@@ -422,6 +497,8 @@ function usage(log: (s: string) => void): void {
   log("  capabilities [--json] [--probe]             Show parity capability status, permissions, gates.");
   log("  analyze <rel-clip> [--out DIR] [--model M]  Local transcription + editorial source analysis.");
   log("      [--language L] [--allow-model-download] [--frames] [--json]");
+  log("  understand <analysis.json> --provider claude Multimodal semantic interpretation of sampled frames.");
+  log("      [--out FILE] [--json]");
   log("  run <brief.json> [--provider id]            Plan (and optionally render) from a brief.");
   log("      [--max-iterations N] [--no-render]");
   log("  feedback --run ID --scope SCOPE --rule TEXT Save an explicit human correction.");

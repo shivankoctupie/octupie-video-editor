@@ -1,0 +1,11 @@
+# Package allowlist for the local source-analysis bridges (parity phase 2A).
+#
+# These are the ONLY third-party Python packages the analysis bridges use. The
+# engine never installs them; an operator installs them explicitly, offline or
+# from a trusted index, before running `agent analyze`. Pin as your environment
+# requires. Nothing here reaches the network at runtime beyond a model's optional
+# first-run download, which is gated behind an explicit --allow-model-download.
+
+faster-whisper>=1.0.0    # local word-timed transcription (transcribe_faster_whisper.py)
+opencv-python>=4.8.0     # local frame metrics: blur, brightness, faces (frame_metrics.py)
+numpy>=1.24.0            # array math for the frame-metrics bridge

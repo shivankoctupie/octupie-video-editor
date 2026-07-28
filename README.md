@@ -79,6 +79,9 @@ npm run agent -- capabilities --probe --json
 
 # Analyze one contained source clip locally
 OVE_ASSET_ROOT=/path/to/media npm run agent -- analyze source/clip.mov --language en --allow-model-download --frames --json
+
+# Interpret validated sampled frames with restricted Claude vision
+npm run agent -- understand output/analysis/clip/analysis.json --provider claude --allow-network --allow-media-upload --json
 ```
 
 ### Local source analysis
@@ -91,6 +94,12 @@ OVE_ASSET_ROOT=/path/to/media npm run agent -- analyze source/clip.mov --languag
 - Optional sampled-frame measurements when `--frames` is set.
 
 The local editorial pass records FFmpeg silence regions, lexical fillers, conservative crew or restart phrases, repeated-take groups, and heuristic hook candidates. OpenCV records blur, brightness, frontal-face boxes, and sampled-frame discontinuity. These are auditable measurements and heuristics. They are not semantic video understanding, expression recognition, or speaker diarization.
+
+### Optional semantic understanding and diarization
+
+`agent understand` is a separate, explicit remote step. It sends only validated sampled JPEG frames and timed transcript data to a restricted Claude CLI process. Both `--allow-network` and `--allow-media-upload` are required. The process uses argument arrays, `shell:false`, Read-only tools, no saved session, an empty MCP configuration, bounded input, output, runtime, and frame counts. Canonical-path checks reject symlink escapes, and JPEG signatures are checked before upload. Returned findings are schema-validated and written under `OVE_ANALYSIS_ROOT`, which defaults to `output/`.
+
+A checked-in pyannote bridge and provider probe are available for real speaker diarization. This optional path requires the packages in `python/requirements-diarization.txt`, an accepted pyannote model, and an operator-provided Hugging Face token. The token stays in the environment and is never placed in process arguments or logs. Diarization remains reported as unavailable until the real runtime and model are present. No speaker labels are invented.
 
 The Python executable and model can be changed with `OVE_PYTHON`, `OVE_WHISPER_MODEL`, `OVE_WHISPER_DEVICE`, and `OVE_WHISPER_COMPUTE`. Named models are cached or local-only by default. Pass `--allow-model-download` explicitly when a missing named model may be downloaded. A local model path runs offline.
 

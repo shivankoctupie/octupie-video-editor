@@ -17,8 +17,12 @@ export interface ExecOptions {
   timeoutMs?: number;
   /** Cap on combined stdout+stderr characters retained. */
   maxBuffer?: number;
-  /** Extra environment. Merged over process.env. */
+  /** Extra environment. Merged over process.env unless replaceEnv is true. */
   env?: NodeJS.ProcessEnv;
+  /** Child working directory. Use this to narrow provider filesystem scope. */
+  cwd?: string;
+  /** Use exactly `env` instead of inheriting process.env. Default false. */
+  replaceEnv?: boolean;
 }
 
 export interface ExecResult {
@@ -52,7 +56,8 @@ export const execProcess: ExecFn = (binary, args, opts = {}) => {
     const child = spawn(binary, args, {
       windowsHide: true,
       shell: false,
-      env: opts.env ? { ...process.env, ...opts.env } : process.env,
+      ...(opts.cwd ? { cwd: opts.cwd } : {}),
+      env: opts.replaceEnv ? (opts.env ?? {}) : opts.env ? { ...process.env, ...opts.env } : process.env,
     });
 
     let stdout = "";

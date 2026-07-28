@@ -1,0 +1,14 @@
+# Package allowlist for the optional speaker-diarization bridge (parity phase 2B).
+#
+# These are the ONLY third-party Python packages the diarization bridge uses. The
+# engine never installs them; an operator installs them explicitly before running
+# diarization, and diarization stays fully optional. When these are absent the
+# bridge reports unavailable and transcription is unaffected.
+#
+# The standard pyannote model needs a Hugging Face account, accepted model terms,
+# and a token supplied by the operator in the HF_TOKEN environment variable. A
+# local model path runs fully offline with no token. Default behavior is
+# cached/local-only; a missing model requires an explicit --allow-model-download.
+
+pyannote.audio>=3.1.0    # speaker diarization pipeline (diarize_pyannote.py)
+torch>=2.0.0             # backend for pyannote.audio; CPU wheels are sufficient
