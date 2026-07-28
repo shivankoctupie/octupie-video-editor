@@ -94,6 +94,12 @@ npm run agent -- discover-assets --intent "2026 team workshop" --source local --
 
 # Drive and web reference discovery is opt-in and needs configured external adapters
 npm run agent -- discover-assets --intent "official product launch" --source drive,web --allow-network --json
+
+# Produce exactly three validated, renderer-ready opening plans offline
+npm run agent -- hook-variants my-plan.json --objective "explain customer retention" --count 3 --provider deterministic --out output/hooks/customer-retention --json
+
+# Optional restricted Claude text drafting needs explicit network consent
+npm run agent -- hook-variants my-plan.json --objective "explain customer retention" --count 3 --provider claude --allow-network --out output/hooks/customer-retention-claude --json
 ```
 
 ### Local source analysis
@@ -130,6 +136,14 @@ Limitations: this is assistive review, not sign-off. A `configured` provider mea
 `agent discover-assets` searches an explicit local asset root offline. It returns a local file only when a strict `<asset>.rights.json` sidecar states a concrete license, attribution requirements, provenance, and either `permissive` or `local-owner` rights. Missing, invalid, unknown, and restricted rights are rejected. Paths are portable and contained by lexical and canonical checks, including symlink and junction escapes. Traversal, result counts, media extensions, and ordering are bounded and deterministic.
 
 Drive and web discovery return references and rights metadata only. They require `--allow-network` and a separately configured official external adapter. Discovery never downloads media. Any future byte materialization uses a distinct method that also requires explicit `media-upload` permission. Public availability, an official page, or a filename is not reuse permission. A human must still verify the license and attribution before publishing.
+
+### Complete hook variants
+
+`agent hook-variants` returns exactly the requested number of distinct, validated edit plans or fails. The deterministic provider runs offline. It changes opening text only, preserves body scenes, media, source ranges, caption timing, and audio, and writes one complete plan per variant plus an atomic manifest under the output root. Requested counts are bounded from 1 to 10. Duplicate text, strategies, plan hashes, invented media, invalid plans, forbidden phrases, missing required keywords, and output path escapes are rejected.
+
+The optional Claude provider is text-only and requires `--allow-network`. It receives no tools, no MCP servers, no session persistence, and bounded input, output, and runtime. Its response is strict data that passes the same complete-count, edit-plan, media, body-change, and uniqueness gates. It never silently pads a short provider result unless deterministic fallback was explicitly selected by an API caller.
+
+Limitations: variants are renderer-ready plans, not approved deliveries. Render each requested opening, preserve the full spoken hook phrase and natural tail, then run phone-scale caption, face-coverage, audio, and manual editorial QA before publishing.
 
 A brief is JSON validated by `src/agent/brief.ts` (AgentBrief v1): objective,
 audience, platform, creator/style, preset, desired duration, relative source

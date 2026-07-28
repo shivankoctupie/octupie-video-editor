@@ -39,6 +39,7 @@ import { critiqueRenderedMaster } from "../critique/critique.js";
 import { reviewPlan } from "../critique/review.js";
 import { discoverAssets } from "../discovery/discover.js";
 import { ASSET_SOURCE_KINDS, type AssetSourceKind } from "../discovery/schemas.js";
+import { produceHookVariants, type HookProviderId } from "../hooks/produce.js";
 
 export interface AgentCliDeps {
   log?: (s: string) => void;
@@ -65,6 +66,8 @@ export interface AgentCliDeps {
   review?: typeof reviewPlan;
   /** Rights-safe asset discovery override (tests). Defaults to local discovery and optional providers. */
   discoverAssets?: typeof discoverAssets;
+  /** Hook-variant production override (tests). Defaults to the real orchestrator. */
+  produceHookVariants?: typeof produceHookVariants;
 }
 
 interface Parsed {
@@ -120,6 +123,8 @@ export async function runAgentCli(argv: string[], deps: AgentCliDeps = {}): Prom
       return cmdReview({ _, flags }, deps, log, errorLog);
     case "discover-assets":
       return cmdDiscoverAssets({ _, flags }, deps, log, errorLog);
+    case "hook-variants":
+      return cmdHookVariants({ _, flags }, deps, log, errorLog);
     case "run":
       return cmdRun({ _, flags }, deps, home, log, errorLog);
     case "feedback":
@@ -663,6 +668,119 @@ async function cmdDiscoverAssets(
   }
 }
 
+/**
+ * `agent hook-variants <plan.json> --objective TEXT --count N` produces exactly N
+ * distinct, renderer-ready, validated hook variants from a source plan. The
+ * deterministic provider is offline; the Claude provider requires an explicit
+ * `--allow-network` grant, checked before any model call. With `--out DIR` it
+ * writes an atomic manifest plus one validated plan JSON per variant under a
+ * contained directory. It never renders.
+ */
+async function cmdHookVariants(
+  parsed: Parsed,
+  deps: AgentCliDeps,
+  log: (s: string) => void,
+  errorLog: (s: string) => void,
+): Promise<number> {
+  const planPath = parsed._[0];
+  const objective = str(parsed.flags, "objective")?.trim();
+  if (!planPath || !objective) {
+    errorLog(
+      "Usage: octupie-video-editor agent hook-variants <plan.json> --objective TEXT --count N [--provider deterministic|claude] [--transcript FILE | --transcript-text TEXT] [--allow-network] [--out DIR] [--json]",
+    );
+    return 2;
+  }
+
+  const countRaw = str(parsed.flags, "count");
+  const count = countRaw === undefined ? NaN : Number(countRaw);
+  if (!Number.isInteger(count) || count < 1 || count > 10) {
+    errorLog("--count must be an integer from 1 to 10.");
+    return 2;
+  }
+
+  const providerId = str(parsed.flags, "provider") ?? "deterministic";
+  if (providerId !== "deterministic" && providerId !== "claude") {
+    errorLog("--provider must be one of: deterministic, claude");
+    return 2;
+  }
+
+  let plan;
+  try {
+    const raw = JSON.parse(readFileSync(resolve(process.cwd(), planPath), "utf8"));
+    const p = parseEditPlan(raw);
+    if (!p.ok || !p.plan) {
+      errorLog(`Invalid plan: ${planPath}`);
+      for (const e of p.errors) errorLog(`  - ${e}`);
+      return 2;
+    }
+    plan = p.plan;
+  } catch (err) {
+    errorLog(`Could not read plan: ${err instanceof Error ? err.message : String(err)}`);
+    return 2;
+  }
+
+  const inlineTranscript = str(parsed.flags, "transcript-text");
+  const transcriptFile = str(parsed.flags, "transcript");
+  let transcriptText = inlineTranscript;
+  if (transcriptText === undefined && transcriptFile !== undefined) {
+    try {
+      transcriptText = readFileSync(resolve(process.cwd(), transcriptFile), "utf8");
+      enforceMaxSize(transcriptText, MAX_SIZES.transcript, "transcript");
+    } catch (err) {
+      errorLog(`Could not read transcript: ${err instanceof Error ? err.message : String(err)}`);
+      return 2;
+    }
+  }
+
+  if (providerId === "claude" && parsed.flags["allow-network"] !== true) {
+    errorLog("Claude hook variants require --allow-network. The deterministic provider works offline.");
+    return 2;
+  }
+
+  const now = deps.now ?? new Date();
+  const permissionPolicy = createPolicy(
+    providerId === "claude"
+      ? [{ action: "network", grantedBy: "operator-cli", grantedAt: now.toISOString(), reason: "hook variant generation" }]
+      : [],
+  );
+
+  const outFlag = str(parsed.flags, "out");
+  const produce = deps.produceHookVariants ?? produceHookVariants;
+
+  try {
+    const res = await produce({
+      request: {
+        objective,
+        count,
+        sourcePlan: plan,
+        ...(transcriptText !== undefined ? { transcriptText } : {}),
+      },
+      providerId: providerId as HookProviderId,
+      permissionPolicy,
+      now,
+      ...(outFlag ? { outputDir: resolve(process.cwd(), outFlag) } : {}),
+    });
+    if (parsed.flags["json"] === true) {
+      log(JSON.stringify({
+        set: res.set,
+        ...(res.outDir ? { outDir: res.outDir } : {}),
+        ...(res.manifestPath ? { manifestPath: res.manifestPath } : {}),
+        ...(res.planPaths ? { planPaths: res.planPaths } : {}),
+      }, null, 2));
+    } else {
+      log(`hook variants: ${res.set.variants.length} of ${res.set.count} (provider ${res.set.provider.id})`);
+      for (const v of res.set.variants) {
+        log(`  ${v.id} [${v.strategy}] ${v.hookText}`);
+      }
+      if (res.manifestPath) log(`manifest: ${res.manifestPath}`);
+    }
+    return 0;
+  } catch (err) {
+    errorLog(`Hook variants failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+}
+
 function cmdFeedback(
   flags: Record<string, string | boolean>,
   deps: AgentCliDeps,
@@ -756,6 +874,9 @@ function usage(log: (s: string) => void): void {
   log("      --allow-network --allow-media-upload [--max-rounds N] [--json]");
   log("  discover-assets --intent TEXT               Rights-cleared local, Drive, or web references.");
   log("      [--source local,drive,web] [--asset-root PATH] [--max-results N] [--allow-network] [--json]");
+  log("  hook-variants <plan.json> --objective TEXT  Exactly N distinct renderer-ready hook plans.");
+  log("      --count N [--provider deterministic|claude] [--transcript FILE | --transcript-text TEXT]");
+  log("      [--allow-network] [--out DIR] [--json]");
   log("  run <brief.json> [--provider id]            Plan (and optionally render) from a brief.");
   log("      [--max-iterations N] [--no-render]");
   log("  feedback --run ID --scope SCOPE --rule TEXT Save an explicit human correction.");

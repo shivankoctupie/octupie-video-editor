@@ -194,6 +194,33 @@ export function assetDiscoveryProbe(
   };
 }
 
+/**
+ * Probe for complete hook-variant production. The deterministic offline producer
+ * is always present, so this reports `configured` (a backing exists but the
+ * full-set gate has not passed with executable evidence). It never reports
+ * `verified`: only a passed acceptance gate can, and the registry downgrades any
+ * unproven claim regardless. The optional restricted Claude text provider is
+ * reported diagnostically only; its absence never changes the status, because the
+ * deterministic producer stands alone offline.
+ */
+export function hookVariantProductionProbe(claudeBin: string, runner: ExecFn = execProcess): CapabilityProbe {
+  return async () => {
+    let claudeNote = "the optional Claude text provider was not checked";
+    try {
+      const res = await runner(claudeBin, ["--version"], { timeoutMs: CLAUDE_VERSION_TIMEOUT_MS });
+      if (res.spawnError) claudeNote = `the optional Claude text provider is unavailable ('${claudeBin}' not runnable)`;
+      else if (res.code === 0) claudeNote = "an optional restricted Claude text provider is also available";
+      else claudeNote = `the optional Claude text provider is unavailable ('${claudeBin}' exit ${res.code})`;
+    } catch (err) {
+      claudeNote = `the optional Claude text provider check failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    return {
+      status: "configured",
+      detail: `Deterministic offline hook-variant producer is present; ${claudeNote}. The full-set gate is not yet passed with executable evidence.`,
+    };
+  };
+}
+
 export interface CapabilityProbeDeps {
   pythonExe?: string;
   runner?: ExecFn;
@@ -221,5 +248,6 @@ export function buildCapabilityProbes(deps: CapabilityProbeDeps = {}): Record<st
       ...(deps.driveConfigured !== undefined ? { driveConfigured: deps.driveConfigured } : {}),
       ...(deps.webConfigured !== undefined ? { webConfigured: deps.webConfigured } : {}),
     }),
+    "hook-variant-production": hookVariantProductionProbe(claudeBin, runner),
   };
 }
