@@ -13,7 +13,8 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          # node:sqlite was added in Node 22.5. Keep CI aligned with package engines and doctor.
+          node-version: 22.5.0
           cache: npm
 
       - name: Install FFmpeg and FFprobe
