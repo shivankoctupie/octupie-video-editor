@@ -1,5 +1,7 @@
 import { runFfmpeg } from "./spawn.js";
+import { probe, audioStream } from "./ffprobe.js";
 import { resolveExistingAssetPath } from "../util/assetRoot.js";
+import { timelineAudioClips } from "../render/media.js";
 import type { EditPlan } from "../schema/editPlan.js";
 
 /**
@@ -121,15 +123,113 @@ export function buildAudioAssemblyArgs(
   ];
 }
 
+/** A timeline audio clip resolved to an absolute file and its placement in the final mix. */
+export interface ResolvedTimelineAudioClip {
+  abs: string;
+  /** Timeline start delay, milliseconds. */
+  startMs: number;
+  /** Trim in-point into the source media, seconds. */
+  sourceIn: number;
+  /** Length taken from the source, seconds. */
+  duration: number;
+  /** 0..1 clip gain (muted tracks are already excluded upstream). */
+  volume: number;
+}
+
 /**
- * Assemble the plan's audio to `outWav`. Uses the procedural bed when nothing is
- * declared; otherwise resolves real files and runs the mix graph.
+ * Build the FFmpeg argument array for a timeline's audio. A silent base of exactly `duration`
+ * seconds pins the length; each clip is trimmed to its source in-point and timeline duration,
+ * resampled to stereo 48 kHz, gained by its clip volume, delayed to its timeline start, then
+ * mixed onto the base and loudness-normalized to the plan target. The visual master is rendered
+ * muted, so this is the single audio source (no double audio).
+ */
+export function buildTimelineAudioArgs(
+  plan: EditPlan,
+  duration: number,
+  clips: ResolvedTimelineAudioClip[],
+  outPath = "audio.wav",
+): string[] {
+  const d = duration.toFixed(3);
+  const target = plan.audio.targetLufs;
+  const tp = plan.audio.truePeakDb;
+
+  const inputs: string[] = ["-f", "lavfi", "-t", d, "-i", "anullsrc=r=48000:cl=stereo"];
+  const filters: string[] = ["[0:a]aformat=sample_fmts=fltp:channel_layouts=stereo[base]"];
+  const mixLabels: string[] = ["[base]"];
+  let idx = 1;
+
+  clips.forEach((clip, k) => {
+    inputs.push("-i", clip.abs);
+    const start = clip.sourceIn.toFixed(3);
+    const end = (clip.sourceIn + clip.duration).toFixed(3);
+    filters.push(
+      `[${idx}:a]atrim=start=${start}:end=${end},asetpts=PTS-STARTPTS,${STEREO_48K},volume=${clip.volume},adelay=${clip.startMs}|${clip.startMs}[c${k}]`,
+    );
+    mixLabels.push(`[c${k}]`);
+    idx++;
+  });
+
+  filters.push(`${mixLabels.join("")}amix=inputs=${mixLabels.length}:normalize=0:duration=first[mix]`);
+  filters.push(`[mix]loudnorm=I=${target}:TP=${tp}:LRA=11[out]`);
+
+  return [
+    ...inputs,
+    "-filter_complex",
+    filters.join(";"),
+    "-map",
+    "[out]",
+    "-ac",
+    "2",
+    "-ar",
+    "48000",
+    "-t",
+    d,
+    "-c:a",
+    "pcm_s16le",
+    "-y",
+    outPath,
+  ];
+}
+
+/**
+ * Resolve every audio-bearing timeline clip under the asset root and keep only those whose
+ * source actually carries an audio stream (a silent video clip contributes nothing to the mix).
+ * Muted tracks and zero-volume clips are already dropped by `timelineAudioClips`.
+ */
+export async function resolveTimelineAudio(plan: EditPlan): Promise<ResolvedTimelineAudioClip[]> {
+  const out: ResolvedTimelineAudioClip[] = [];
+  for (const clip of timelineAudioClips(plan)) {
+    const abs = resolveExistingAssetPath(clip.path, `timeline audio clip '${clip.id}'`);
+    const probed = await probe(abs);
+    if (!audioStream(probed)) continue;
+    out.push({ abs, startMs: Math.round(clip.start * 1000), sourceIn: clip.sourceIn, duration: clip.duration, volume: clip.volume });
+  }
+  return out;
+}
+
+/**
+ * Assemble the plan's audio to `outWav`. When the plan carries a timeline, the audio is built
+ * from its video/audio clips (start, trim, volume, muted tracks); if none of them contribute
+ * audio, the procedural bed keeps QA's loudness contract satisfied. When there is no timeline,
+ * the legacy behavior is unchanged: real declared files are mixed, else the procedural bed.
  */
 export async function assembleAudio(
   plan: EditPlan,
   duration: number,
   outWav: string,
 ): Promise<void> {
+  if (plan.timeline) {
+    const clips = await resolveTimelineAudio(plan);
+    if (clips.length === 0) {
+      await buildProceduralBed(plan, duration, outWav);
+      return;
+    }
+    const res = await runFfmpeg(buildTimelineAudioArgs(plan, duration, clips, outWav));
+    if (res.code !== 0) {
+      throw new Error(`Timeline audio assembly failed: ${res.stderr.trim().slice(0, 400)}`);
+    }
+    return;
+  }
   if (!declaresExternalAudio(plan)) {
     await buildProceduralBed(plan, duration, outWav);
     return;

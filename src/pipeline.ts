@@ -50,10 +50,13 @@ export async function renderPlan(
   await muxFinalMaster(plan, silentPath, bedPath, finalPath, seconds);
 
   step("qa: validating the exact delivered master");
+  // QA validates the master against the geometry the render actually produced. That geometry
+  // comes from the composition metadata, which is derived from the timeline when the plan carries
+  // one and the plan fields otherwise, so QA and the render share a single source of truth.
   const report = await runFinalMasterQa(finalPath, {
-    width: plan.width,
-    height: plan.height,
-    fps: plan.fps,
+    width: render.width,
+    height: render.height,
+    fps: render.fps,
     durationSeconds: seconds,
     durationToleranceSec: 0.6,
     targetLufs: plan.audio.targetLufs,

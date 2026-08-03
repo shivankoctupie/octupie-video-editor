@@ -6,7 +6,7 @@ Proprietary and private. See `package.json` (`UNLICENSED`).
 
 ## Requirements
 
-- Node.js 20 or newer.
+- Node.js 22.5.0 or newer (the server store uses the built-in `node:sqlite` module, added in 22.5.0).
 - FFmpeg and FFprobe on `PATH` (or set `OVE_FFMPEG_PATH` and `OVE_FFPROBE_PATH`).
 - For local transcription: Python with `faster-whisper`.
 - For local frame measurements: Python with OpenCV (`cv2`) and NumPy.
@@ -22,6 +22,22 @@ npm run demo            # render a short synthetic reel and QA the exact master
 
 The demo writes a playable MP4 with audio, plus a QA report bound to the master's SHA-256, under `output/` (gitignored).
 
+## Product server and browser editor
+
+The engine also ships as a self-contained, local-first product: an authenticated multi-user REST server and a real React timeline editor (React 19 + Vite, source in `src/client/`, built into `public/`) for editing, review, and publishing. It loads nothing from a CDN. See `QUICKSTART.md` for a full walkthrough; the short version is:
+
+```bash
+# One shared on-disk database is needed so the server and worker cooperate.
+export OVE_SERVER_DB=./output/server/ove.db
+export OVE_SERVER_USERS='[{"id":"u1","tenantId":"t1","username":"editor","role":"editor","token":"a-long-random-editor-token"}]'
+
+npm run dev       # build the React client, then start the server (editor + REST API) on http://127.0.0.1:8722
+npm run worker    # in a second terminal: claim and render queued jobs off the request path
+# npm run build && npm start   # run the compiled server instead of the tsx dev server
+```
+
+Open the printed URL, paste a token, and you get a genuine timeline editor: a media bin (upload by picker or drag, with poster thumbnails and decoded audio waveforms), a synchronized preview with play/seek and a playhead that follows playback, an inspector, and a multi-track timeline (video, overlays, captions, audio) driven by the MIT `@xzdarcy/react-timeline-editor` engine with drag-to-move, trim handles, split, ripple delete, snapping, zoom, and undo/redo. Edits map losslessly into the validated EditPlan and immutable versions, with autosave and explicit Save version, so a reload reproduces the timeline exactly. A Manage panel holds the secondary flows: render enqueue and job status, frame comments, submit/approve/reject, truthful version comparison, QA display, local generation and grant-gated materialization with provenance, and a default-disabled publish request, all gated by the token's role. Tokens and permission grants come only from the environment or an explicit config; with none configured the server still runs locally with an in-memory database, publishing disabled, and no network adapters.
+
 ## CLI
 
 The binary is `octupie-video-editor` (run `npm run build` first, or use `npm run cli -- <command>` in development).
@@ -34,6 +50,8 @@ The binary is `octupie-video-editor` (run `npm run build` first, or use `npm run
 | `render <plan.json>` | Render, assemble audio, mux, and QA a final master. |
 | `qa <master.mp4> --plan <plan.json>` | QA an existing master against a plan. |
 | `demo` | Generate and render a synthetic demo, then QA it. |
+| `serve [--port n]` | Start the local product server: the browser editor, review UI, and REST API. |
+| `worker [--once]` | Run the render/QA job worker against the shared database, off the request path. |
 | `agent <subcommand>` | Bounded agent: brief to validated plan, optional render, learning. |
 
 Example:
@@ -189,7 +207,7 @@ npm run agent -- workflow-authorize publisher publish
 npm run agent -- workflow-publish request.json --allow-publish --state-root output/workflow --project-root .
 ```
 
-Limitations: no external publishing adapter ships with the repository. Frame-level review UI and visual version comparison are product-surface work built over the immutable records, not implemented as a browser application here. File-backed stores are intended for one local worker at a time. A multi-worker deployment needs a transactional database queue and unique constraints.
+The commands above drive the file-backed agent workflow store. The same guarantees are also exposed by the product server (`npm run dev`) over a transactional SQLite database with unique idempotency constraints, a concurrency-safe FIFO job claim, and content-addressed storage, with the browser app providing the frame-level review UI and truthful visual version comparison over those immutable records. The product server ships one optional publishing adapter, an HTTPS webhook that is off by default and enabled only when the operator configures an endpoint and an allowlist; SSRF and DNS-rebinding defenses run before any byte is sent. See `PRODUCTIZATION.md` and `SECURITY.md` for the boundary and `PRODUCT_ACCEPTANCE.json` for the local gates that are executable-verified.
 
 A brief is JSON validated by `src/agent/brief.ts` (AgentBrief v1): objective,
 audience, platform, creator/style, preset, desired duration, relative source
@@ -229,9 +247,12 @@ Remotion reads footage and stills from this root. FFmpeg reads dialogue, music, 
 
 ## Scripts
 
-- `npm test` runs the full suite, including the real render and QA integration.
+- `npm test` runs the full suite, including the real render and QA integration and the product acceptance and browser smoke tests.
 - `npm run typecheck` runs strict TypeScript validation.
 - `npm run build` compiles the Node code to `dist/`.
+- `npm run dev` starts the local product server from source (browser editor + REST API).
+- `npm start` runs the compiled product server from `dist/` (build first).
+- `npm run worker` runs the render/QA job worker against the shared database.
 - `npm run schema:gen` regenerates the committed JSON Schema from the Zod source.
 - `npm run dash:sweep` fails on any em or en dash in committed text.
 - `npm run sfx:fetch -- --manifest <file>` runs the rights-safe SFX mechanism (dry run by default).
@@ -240,7 +261,12 @@ Remotion reads footage and stills from this root. FFmpeg reads dialogue, music, 
 
 - `ARCHITECTURE.md`: the planner and renderer split, storage and job boundaries, security.
 - `AGENTIC_ARCHITECTURE.md`: the standalone bounded agent, providers, learning, and audit.
-- `PRODUCTIZATION.md`: integrating the engine into Octupie and Dowd.
+- `PRODUCTIZATION.md`: the local product server and how the engine integrates into Octupie and Dowd.
+- `QUICKSTART.md`: run the product server, sign in, and walk the full editor and review flow.
+- `SECURITY.md`: the trust boundary, auth, RBAC, permission grants, SSRF defenses, and secret handling.
+- `FULL_PARITY_ARCHITECTURE.md`: the eight parity capabilities and what is verified, configured, or intentionally unverified.
+- `ACCEPTANCE_MANIFEST.json`: the external-provider parity gates (pending until backed by real evidence).
+- `PRODUCT_ACCEPTANCE.json`: the local-product gates, each executable-verified by the test suite.
 - `ASSET_POLICY.md`: media, licensing, and what stays out of Git.
 - `STYLE_LEARNING.md`: how learned editing rules become code, schema, and tests.
 - `WORKSPACE_AUDIT.md`: what was reused from internal workspaces and what was excluded.

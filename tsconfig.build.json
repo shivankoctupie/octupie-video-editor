@@ -10,6 +10,7 @@
   "exclude": [
     "tests",
     "src/**/*.test.ts",
-    "src/render/remotion/**"
+    "src/render/remotion/**",
+    "src/client"
   ]
 }

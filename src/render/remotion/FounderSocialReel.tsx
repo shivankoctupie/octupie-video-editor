@@ -12,14 +12,19 @@ import {
   sceneFrames,
   hexAlpha,
 } from "./components.js";
+import { TimelineStage } from "./TimelineStage.js";
 
 /**
  * FounderSocialReel: a 9:16 founder short. Persistent hook region above the
  * media, captions in the safe band, restrained motion. Frame 0 is intentional.
+ * When the plan carries an editor timeline, the full timeline is composited
+ * instead (every track/clip with transforms and styling); legacy scene/caption
+ * plans render exactly as before.
  */
 export const FounderSocialReel: React.FC<{ plan: EditPlan }> = ({ plan }) => {
   const { width, height } = useVideoConfig();
   const { brand } = plan;
+  if (plan.timeline) return <TimelineStage plan={plan} />;
   const hookText = plan.scenes[0]?.heading ?? plan.title;
 
   return (

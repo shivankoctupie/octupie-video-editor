@@ -73,3 +73,4 @@ export function actionsForRole(role: WorkflowRole): readonly WorkflowAction[] {
 }
 
 export { WORKFLOW_ACTIONS, WORKFLOW_ROLES } from "./schemas.js";
+export type { WorkflowAction, WorkflowRole } from "./schemas.js";

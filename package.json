@@ -6,7 +6,7 @@
   "description": "Portable, deterministic AI-assisted video editing engine. Language models produce validated edit plans; deterministic code performs timing, captions, rendering, audio assembly, and QA.",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.5.0"
   },
   "bin": {
     "octupie-video-editor": "dist/cli.js"
@@ -14,6 +14,7 @@
   "files": [
     "dist",
     "src",
+    "public",
     "python",
     "schema",
     "skills",
@@ -22,27 +23,41 @@
     "AGENTIC_ARCHITECTURE.md",
     "FULL_PARITY_ARCHITECTURE.md",
     "ACCEPTANCE_MANIFEST.json",
+    "PRODUCT_ACCEPTANCE.json",
     "ASSET_POLICY.md",
     "PRODUCTIZATION.md",
+    "QUICKSTART.md",
+    "SECURITY.md",
     "STYLE_LEARNING.md",
     "WORKSPACE_AUDIT.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "vite build",
+    "build:server": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install chromium",
     "schema:gen": "tsx src/schema/generate.ts",
     "cli": "tsx src/cli.ts",
     "agent": "tsx src/cli.ts agent",
     "doctor": "tsx src/cli.ts doctor",
     "demo": "tsx src/cli.ts demo",
+    "dev": "npm run build:client && tsx src/cli.ts serve",
+    "dev:client": "vite",
+    "dev:server": "tsx src/cli.ts serve",
+    "start": "node dist/cli.js serve",
+    "worker": "tsx src/cli.ts worker",
     "sfx:fetch": "tsx scripts/fetch-sfx.ts",
     "dash:sweep": "node scripts/dash-sweep.mjs"
   },
   "dependencies": {
     "@remotion/bundler": "^4.0.0",
     "@remotion/renderer": "^4.0.0",
+    "@xzdarcy/react-timeline-editor": "^1.0.0",
+    "@xzdarcy/timeline-engine": "^1.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "remotion": "^4.0.0",
@@ -50,9 +65,12 @@
     "zod-to-json-schema": "^3.24.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.5",
+    "jsdom": "^29.1.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.10"

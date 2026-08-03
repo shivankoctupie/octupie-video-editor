@@ -1,10 +1,31 @@
 # Full Parity Architecture
 
 This document defines the standalone architecture for eight capability areas the
-engine intends to reach. Parity phase 1 lands the contracts, the permission
+engine intends to reach. Parity phase 1 landed the contracts, the permission
 model, the capability registry and its diagnostics, and the acceptance framework.
-It does not implement the eight capabilities. Every one is reported `unavailable`
-until a real provider backs it and its acceptance gates pass.
+Later phases implemented the local, offline halves of several capabilities and the
+full local product server for human review and publishing.
+
+Read the status honestly, in three states (unchanged from the registry's own three
+states below):
+
+- Verified local: implemented and executable-verified offline. This covers human
+  review and publishing (capability 8) as the product server in `src/server/` and
+  its browser app in `public/`; local deterministic generation (SVG and labelled
+  WAV); the local half of asset discovery and materialization; complete hook-variant
+  production; and reviewed improvement proposals with approval and rollback. Their
+  local gates live in `PRODUCT_ACCEPTANCE.json`, proven by the test suite.
+- Configured but unverified: a backing provider or endpoint can be wired by env only
+  and is never reported verified. This covers the OpenAI-compatible generation HTTP
+  adapters, the S3 storage contract, the Google Drive materialization path, the HTTPS
+  webhook publishing adapter, and the official Hermes API surface.
+- Intentionally unverified (external providers): direct semantic video understanding,
+  automatic transcription with word timing and diarization, and rendered-draft
+  multimodal critique. These reach beyond the local boundary and stay `pending` in
+  `ACCEPTANCE_MANIFEST.json` until backed by real evidence. Nothing marks them green.
+
+Removing every optional capability still leaves the offline plan-to-master pipeline
+working exactly as before.
 
 The prime directive from `ARCHITECTURE.md` and `AGENTIC_ARCHITECTURE.md` is
 unchanged: language models return data, deterministic code validates and executes

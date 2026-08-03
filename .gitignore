@@ -8,3 +8,11 @@ output/
 Thumbs.db
 coverage/
 .vitest/
+test-results/
+playwright-report/
+# Local SQLite product store (node:sqlite) and its WAL/shared-memory sidecars
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3

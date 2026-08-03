@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 import { parseEditPlan } from "./schema/editPlan.js";
 import { getPreset, listPresets } from "./presets/index.js";
 import { makeStarterPlan } from "./presets/starter.js";
@@ -10,6 +10,7 @@ import { runFinalMasterQa, writeQaReport } from "./ffmpeg/qa.js";
 import { renderPlan } from "./pipeline.js";
 import { runDemo } from "./demo/generate.js";
 import { runAgentCli } from "./agent/cli.js";
+import { configFromEnv, startServer, createWorkerRuntime, runWorkerOnce, runWorkerLoop } from "./server/index.js";
 
 interface Args {
   _: string[];
@@ -39,6 +40,26 @@ function parseArgs(argv: string[]): Args {
 
 function log(msg: string): void {
   process.stdout.write(msg + "\n");
+}
+
+/**
+ * Minimum Node runtime. The product store runs on the built-in `node:sqlite` module, which was
+ * added in Node 22.5.0, so anything older cannot start the server or worker.
+ */
+export const MIN_NODE_VERSION = "22.5.0";
+
+/** True when `version` (e.g. process.versions.node) is at least `min`. A prerelease suffix
+ * (`-nightly...`, `-rc.1`) is ignored; only the numeric major.minor.patch is compared. */
+export function nodeMeetsMinimum(version: string, min: string = MIN_NODE_VERSION): boolean {
+  const parse = (v: string): number[] => v.split("-")[0]!.split(".").map((n) => Number(n) || 0);
+  const a = parse(version);
+  const b = parse(min);
+  for (let i = 0; i < 3; i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x !== y) return x > y;
+  }
+  return true;
 }
 
 function fail(msg: string): never {
@@ -71,8 +92,7 @@ function loadPlanFile(path: string) {
 }
 
 async function cmdDoctor(): Promise<number> {
-  const major = Number(process.versions.node.split(".")[0]);
-  const nodeOk = major >= 20;
+  const nodeOk = nodeMeetsMinimum(process.versions.node);
   const ffmpegOk = await binaryAvailable(ffmpegBinary());
   const ffprobeOk = await binaryAvailable(ffprobeBinary());
   let remotionOk = true;
@@ -82,7 +102,7 @@ async function cmdDoctor(): Promise<number> {
     remotionOk = false;
   }
   const rows: Array<[string, boolean, string]> = [
-    ["Node >= 20", nodeOk, `found v${process.versions.node}`],
+    [`Node >= ${MIN_NODE_VERSION}`, nodeOk, `found v${process.versions.node} (node:sqlite needs ${MIN_NODE_VERSION})`],
     ["FFmpeg", ffmpegOk, ffmpegBinary()],
     ["FFprobe", ffprobeOk, ffprobeBinary()],
     ["@remotion/renderer", remotionOk, remotionOk ? "resolvable" : "not installed"],
@@ -187,6 +207,75 @@ async function cmdDemo(): Promise<number> {
   return 0;
 }
 
+/** Default the static UI directory to the packaged `public/` beside this module (which
+ * resolves to the repo root in dev and the package root when installed) unless the
+ * operator has pointed OVE_SERVER_PUBLIC elsewhere. */
+function defaultPublicDir(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "public");
+}
+
+async function cmdServe(args: Args): Promise<number> {
+  const config = configFromEnv();
+  if (!process.env.OVE_SERVER_PUBLIC) config.publicDir = defaultPublicDir();
+  if (args.flags.port !== undefined) config.port = requireNumberFlag(args.flags, "port");
+  if (typeof args.flags.public === "string") config.publicDir = resolve(process.cwd(), args.flags.public);
+  const server = await startServer(config);
+  log(`octupie-video-editor serving on ${server.url}`);
+  log(`  db      = ${config.dbPath}`);
+  log(`  storage = ${config.storageRoot}`);
+  log(`  public  = ${config.publicDir}`);
+  if (config.users.length === 0) {
+    log("  note: no users configured. Set OVE_SERVER_USERS (JSON array) to enable authenticated routes.");
+  } else {
+    log(`  users   = ${config.users.length} (${config.users.map((u) => u.role).join(", ")})`);
+  }
+  log("Press Ctrl+C to stop.");
+  await new Promise<void>((resolveDone) => {
+    let closing = false;
+    const shutdown = (): void => {
+      if (closing) return;
+      closing = true;
+      log("shutting down...");
+      void server.close().then(() => {
+        log("stopped.");
+        resolveDone();
+      });
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+  });
+  return 0;
+}
+
+async function cmdWorker(args: Args): Promise<number> {
+  const config = configFromEnv();
+  if (config.dbPath === ":memory:") {
+    fail("The worker needs a shared on-disk database. Set OVE_SERVER_DB to a file path (the same one the server uses).");
+  }
+  const { deps, close } = createWorkerRuntime(config, { log: (m) => log(`  ${m}`) });
+  const once = args.flags.once === true || args.flags.once === "true";
+  try {
+    if (once) {
+      const job = await runWorkerOnce(deps);
+      log(job ? `ran job ${job.id} -> ${job.status}` : "queue empty; nothing to do.");
+      return 0;
+    }
+    log(`worker polling ${config.dbPath}. Press Ctrl+C to stop.`);
+    let stop = false;
+    const onSignal = (): void => {
+      stop = true;
+    };
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
+    const interval = args.flags.interval !== undefined ? requireNumberFlag(args.flags, "interval") : 1000;
+    await runWorkerLoop(deps, { intervalMs: interval, shouldStop: () => stop });
+    log("worker stopped.");
+    return 0;
+  } finally {
+    close();
+  }
+}
+
 function usage(): void {
   log("octupie-video-editor <command>");
   log("");
@@ -197,6 +286,8 @@ function usage(): void {
   log("  render <plan.json>     Render, assemble audio, mux, and QA a master.");
   log("  qa <master.mp4>        QA an existing master (--plan or explicit flags).");
   log("  demo                   Generate and render a synthetic demo, then QA it.");
+  log("  serve [--port n]       Start the local product server (browser editor + REST API).");
+  log("  worker [--once]        Run the render/QA job worker against the shared database.");
   log("  agent <subcommand>     Bounded agent: providers, run, feedback, rules, deactivate.");
   log("");
   log(`Presets: ${listPresets().map((p) => p.id).join(", ")}`);
@@ -229,6 +320,12 @@ export async function main(): Promise<void> {
         break;
       case "demo":
         process.exit(await cmdDemo());
+        break;
+      case "serve":
+        process.exit(await cmdServe(args));
+        break;
+      case "worker":
+        process.exit(await cmdWorker(args));
         break;
       case "help":
       case undefined:
