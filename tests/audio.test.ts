@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseEditPlan, type EditPlan } from "../src/schema/editPlan.js";
-import { buildAudioAssemblyArgs, assembleAudio } from "../src/ffmpeg/audio.js";
+import { buildAudioAssemblyArgs, buildTimelineAudioArgs, assembleAudio } from "../src/ffmpeg/audio.js";
 import { runFfmpeg } from "../src/ffmpeg/spawn.js";
 import { probe, audioStream } from "../src/ffmpeg/ffprobe.js";
 
@@ -59,6 +59,47 @@ describe("buildAudioAssemblyArgs", () => {
     expect(joined).toContain("-stream_loop -1 -i /abs/music.wav");
     expect(args).toContain("/abs/dialogue.wav");
     expect(args).toContain("/abs/whoosh.wav");
+  });
+
+  it("never uses -shortest", () => {
+    expect(args).not.toContain("-shortest");
+  });
+});
+
+describe("buildTimelineAudioArgs", () => {
+  const p = plan();
+  const clips = [
+    { abs: "/abs/hero.mp4", startMs: 0, sourceIn: 1.5, duration: 4, volume: 0.8 },
+    { abs: "/abs/track.wav", startMs: 2000, sourceIn: 0, duration: 3, volume: 0.5 },
+  ];
+  const args = buildTimelineAudioArgs(p, 6, clips);
+  const joined = args.join(" ");
+  const fc = args[args.indexOf("-filter_complex") + 1]!;
+
+  it("pins length with a silent base and an explicit output duration", () => {
+    expect(joined).toContain("anullsrc");
+    expect(fc).toContain("[base]");
+    expect(joined).toContain("-t 6.000");
+  });
+
+  it("trims each clip to its source in-point and timeline duration", () => {
+    expect(fc).toContain("atrim=start=1.500:end=5.500"); // sourceIn 1.5 .. 1.5 + 4
+    expect(fc).toContain("atrim=start=0.000:end=3.000"); // sourceIn 0 .. 0 + 3
+  });
+
+  it("delays each clip to its timeline start and applies its clip volume", () => {
+    expect(fc).toContain("adelay=0|0");
+    expect(fc).toContain("adelay=2000|2000");
+    expect(fc).toContain("volume=0.8");
+    expect(fc).toContain("volume=0.5");
+  });
+
+  it("resamples to stereo 48 kHz, mixes onto the base, and loudness-normalizes to the plan target", () => {
+    expect(fc).toContain("aresample=48000");
+    expect(fc).toContain("amix=inputs=3"); // two clips + silent base
+    expect(fc).toContain("loudnorm=I=-16:TP=-1.5");
+    expect(args).toContain("/abs/hero.mp4");
+    expect(args).toContain("/abs/track.wav");
   });
 
   it("never uses -shortest", () => {

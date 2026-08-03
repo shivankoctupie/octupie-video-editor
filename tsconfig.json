@@ -17,5 +17,6 @@
     "verbatimModuleSyntax": false,
     "types": ["node"]
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests"],
+  "exclude": ["node_modules", "dist", "src/client", "tests/client", "tests/e2e"]
 }

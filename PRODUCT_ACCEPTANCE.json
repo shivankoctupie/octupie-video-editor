@@ -1,0 +1,133 @@
+{
+  "format": "octupie-product-acceptance/v1",
+  "note": "Executable acceptance gates for the LOCAL, self-contained product: the browser editor, the authenticated REST server, local content-addressed storage, the transactional job queue and worker, local deterministic generation, grant-gated materialization with SSRF defenses, and default-disabled publishing. These gates are distinct from ACCEPTANCE_MANIFEST.json, which tracks the eight external-provider parity gates that stay pending until backed by real evidence. A gate here is 'passed' only because tests/product-acceptance.test.ts executes it end to end against a real server started in a temporary workspace; if that check regresses, the test suite fails. The test also asserts that every gate id below is actually covered, so this file cannot claim a capability the tests do not prove.",
+  "boundary": "All gates run offline and deterministically. Network transports for materialization and webhooks are injected in tests, so no gate depends on a live external provider. Real-media semantic understanding, transcription, diarization, and third-party generation/publishing providers are NOT covered here and remain pending in the parity manifest.",
+  "gates": [
+    {
+      "id": "product:auth-rbac",
+      "capability": "authenticated-multi-user-server",
+      "title": "Token auth with default-deny RBAC",
+      "kind": "e2e-local",
+      "status": "passed",
+      "evidence": "tests/product-acceptance.test.ts + tests/server-http.test.ts",
+      "description": "An unauthenticated or unknown-token API call is refused; a valid token resolves to a principal whose role determines which actions are allowed. A viewer cannot create a project; an editor can."
+    },
+    {
+      "id": "product:tenant-project-isolation",
+      "capability": "authenticated-multi-user-server",
+      "title": "Tenant and project scoping",
+      "kind": "e2e-local",
+      "status": "passed",
+      "evidence": "tests/product-acceptance.test.ts + tests/server-db.test.ts",
+      "description": "Every read and write is scoped to the principal's tenant; a project or version id outside the tenant is a 404, never a cross-tenant read."
+    },
+    {
+      "id": "product:plan-validate-save-load",
+      "capability": "editor",
+      "title": "Validated plan save and load, invalid plan rejected",
+      "kind": "e2e-local",
+      "status": "passed",
+      "evidence": "tests/product-acceptance.test.ts",
+      "description": "A schema-valid plan is saved as a version and loaded back; an invalid plan is rejected with a 400 and its validation errors, and no version is created."
+    },
+    {
+      "id": "product:immutable-versions",
+      "capability": "review-publishing",
+      "title": "Append-only, monotonic versions",
+      "kind": "e2e-local",
+      "status": "passed",
+      "evidence": "tests/product-acceptance.test.ts + tests/server-db.test.ts",
+      "description": "Saving repeatedly appends versions with strictly increasing version numbers; a version row is never mutated in place."
+    },
+    {
+      "id": "product:jobs-fifo-idempotent-offpath",
+      "capability": "job-queue-worker",
+      "title": "Idempotent FIFO enqueue with worker off the request path",
+      "kind": "e2e-local",
+      "status": "passed",
+      "evidence": "tests/product-acceptance.test.ts + tests/server-http.test.ts",
+      "description": "Enqueue is idempotent by key (a repeat returns the same job, created=false); the request path only enqueues, and a worker claims and runs the job separately, persisting its QA outcome against the version."
+    },
+    {
+      "id": "product:content-addressed-media",
+      "capability": "storage",
+      "title": "Content-addressed upload and byte-exact serving",
+      "kind": "e2e-local",
+      "status": "passed",
+      "evidence": "tests/product-acceptance.test.ts + tests/server-auth-upload.test.ts",
+      "description": "A media upload streams under a byte cap into content-addressed local storage keyed by SHA-256; a disallowed type is refused; the stored bytes are served back byte-for-byte for in-app preview."
+    },
+    {
+      "id": "product:frame-comments",
+      "capability": "review-publishing",
+      "title": "Frame-anchored comments persist and resolve",
+      "kind": "e2e-local",
+      "status": "passed",
+      "evidence": "tests/product-acceptance.test.ts",
+      "description": "A frame comment added at a time is stored against the correct version and retrievable with its anchor and resolved state; resolving it flips and persists the resolved flag."
+    },
+    {
+      "id": "product:review-decision-rbac",
+      "capability": "review-publishing",
+      "title": "Submit and approve gated by role",
+      "kind": "e2e-local",
+      "status": "passed",
+      "evidence": "tests/product-acceptance.test.ts + tests/server-http.test.ts",
+      "description": "An editor can submit a version for review; a viewer cannot decide; an approver or admin records an approval that moves the version to approved."
+    },
+    {
+      "id": "product:version-compare-truthful",
+      "capability": "review-publishing",
+      "title": "Truthful version comparison",
+      "kind": "e2e-local",
+      "status": "passed",
+      "evidence": "tests/product-acceptance.test.ts",
+      "description": "Comparing two stored versions reports plan-identical only when the plan SHA-256 matches, and reports concrete structural deltas (duration, scenes, caption cards) when they differ."
+    },
+    {
+      "id": "product:generation-provenance",
+      "capability": "generation",
+      "title": "Local deterministic generation with provenance",
+      "kind": "e2e-local",
+      "status": "passed",
+      "evidence": "tests/product-acceptance.test.ts + tests/generation.test.ts",
+      "description": "The local image and TTS providers produce assets marked synthetic:true with a human-readable provenance label, stored atomically and registered as generated media."
+    },
+    {
+      "id": "product:materialization-gated-ssrf",
+      "capability": "materialization",
+      "title": "Grant-gated, rights-required, SSRF-guarded materialization",
+      "kind": "e2e-local",
+      "status": "passed",
+      "evidence": "tests/product-acceptance.test.ts + tests/materialize.test.ts + tests/ssrf.test.ts",
+      "description": "Web/Drive materialization is refused without a network and media-upload grant and without reusable rights; with grants and an injected transport it fetches, hashes, and stores an asset with provenance; a private/rebinding host is refused before any byte is sent."
+    },
+    {
+      "id": "product:publishing-default-disabled",
+      "capability": "review-publishing",
+      "title": "Publishing disabled by default with honest gate reasons",
+      "kind": "e2e-local",
+      "status": "passed",
+      "evidence": "tests/product-acceptance.test.ts + tests/webhook-publishing.test.ts",
+      "description": "A publish request is refused when there is no publishing grant, no approved version, or no enabled adapter, and the response names the exact gate that blocked it. No default network behavior exists."
+    },
+    {
+      "id": "product:ui-served-no-cdn",
+      "capability": "editor",
+      "title": "Self-contained browser app served with no CDN",
+      "kind": "e2e-local",
+      "status": "passed",
+      "evidence": "tests/browser-smoke.test.ts",
+      "description": "The server serves the browser app shell, its script, and its stylesheet locally; none of them reference an external CDN host."
+    },
+    {
+      "id": "product:clean-shutdown",
+      "capability": "authenticated-multi-user-server",
+      "title": "Clean startup and shutdown",
+      "kind": "e2e-local",
+      "status": "passed",
+      "evidence": "tests/browser-smoke.test.ts",
+      "description": "The server starts in a temporary workspace, serves requests, and closes cleanly, releasing the listener and closing the database handle."
+    }
+  ]
+}

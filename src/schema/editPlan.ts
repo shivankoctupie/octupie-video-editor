@@ -140,6 +140,103 @@ export const outputSchema = z
   })
   .strict();
 
+/*
+ * Editor timeline (additive, optional, backward-compatible).
+ *
+ * The browser timeline editor is track/clip based with per-clip transforms, trims, text,
+ * and volume. That richer state is stored here losslessly so a reload reproduces the exact
+ * timeline. It is purely additive: legacy plans omit it and still validate. The deterministic
+ * renderer keeps consuming `scenes`/`captions`/`sourceClips`; on save the editor derives a
+ * valid projection into those fields, so both the editor and the renderer stay honest.
+ */
+const transformSchema = z
+  .object({
+    x: z.number().finite(),
+    y: z.number().finite(),
+    scale: z.number().finite().positive(),
+    rotation: z.number().finite(),
+    opacity: z.number().min(0).max(1),
+  })
+  .strict();
+
+const captionStyleSchema = z
+  .object({
+    fontSize: z.number().finite().positive(),
+    color: hexColor,
+    background: z.union([hexColor, z.literal("")]),
+    align: z.enum(["left", "center", "right"]),
+    bold: z.boolean(),
+  })
+  .strict();
+
+export const timelineTrackSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: z.enum(["video", "overlay", "caption", "audio"]),
+    name: z.string(),
+    muted: z.boolean(),
+    locked: z.boolean(),
+  })
+  .strict();
+
+export const timelineClipSchema = z
+  .object({
+    id: z.string().min(1),
+    trackId: z.string().min(1),
+    start: nonNegative,
+    duration: z.number().finite().positive(),
+    mediaId: z.string().min(1).nullable(),
+    // Render-only media reference: the safe relative storage path the deterministic renderer
+    // resolves this clip's bytes from. The editor keys media by `mediaId` locally; on save it
+    // fills `mediaPath` for every media-backed clip so the final master can project the whole
+    // timeline, not just the first video track. Optional and additive: timelines saved before
+    // this field still validate and load (the editor re-derives the path from `mediaId` on the
+    // next save), and text/caption clips never carry one.
+    mediaPath: safePath.optional(),
+    sourceIn: nonNegative,
+    sourceDuration: z.number().finite().positive().nullable(),
+    text: z.string(),
+    transform: transformSchema,
+    volume: z.number().min(0).max(1),
+    captionStyle: captionStyleSchema.nullable(),
+    name: z.string(),
+  })
+  .strict();
+
+export const editorTimelineSchema = z
+  .object({
+    version: z.literal(1),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    fps: z.number().int().positive().max(120),
+    duration: z.number().finite().positive(),
+    tracks: z.array(timelineTrackSchema),
+    clips: z.array(timelineClipSchema),
+  })
+  .strict()
+  .superRefine((tl, ctx) => {
+    const trackIds = new Set(tl.tracks.map((t) => t.id));
+    const seenTrack = new Set<string>();
+    tl.tracks.forEach((t, i) => {
+      if (seenTrack.has(t.id)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `duplicate timeline track id '${t.id}'`, path: ["tracks", i, "id"] });
+      } else {
+        seenTrack.add(t.id);
+      }
+    });
+    const seenClip = new Set<string>();
+    tl.clips.forEach((c, i) => {
+      if (!trackIds.has(c.trackId)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `timeline clip '${c.id}' references unknown track '${c.trackId}'`, path: ["clips", i, "trackId"] });
+      }
+      if (seenClip.has(c.id)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `duplicate timeline clip id '${c.id}'`, path: ["clips", i, "id"] });
+      } else {
+        seenClip.add(c.id);
+      }
+    });
+  });
+
 export const editPlanSchema = z
   .object({
     format: z.literal("octupie-edit-plan/v1"),
@@ -156,6 +253,7 @@ export const editPlanSchema = z
     sourceClips: z.array(sourceClipSchema).default([]),
     audio: audioSchema.default({ targetLufs: -16, truePeakDb: -1.5, sfx: [] }),
     output: outputSchema,
+    timeline: editorTimelineSchema.optional(),
   })
   .strict()
   .superRefine((plan, ctx) => {
@@ -273,6 +371,9 @@ export const editPlanSchema = z
 export type EditPlan = z.infer<typeof editPlanSchema>;
 export type Scene = z.infer<typeof sceneSchema>;
 export type CaptionCard = z.infer<typeof captionCardSchema>;
+export type EditorTimeline = z.infer<typeof editorTimelineSchema>;
+export type TimelineTrackValue = z.infer<typeof timelineTrackSchema>;
+export type TimelineClipValue = z.infer<typeof timelineClipSchema>;
 
 export interface ParseResult {
   ok: boolean;

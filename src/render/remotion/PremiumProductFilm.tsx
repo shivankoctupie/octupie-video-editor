@@ -12,14 +12,18 @@ import {
   SceneAsset,
   sceneFrames,
 } from "./components.js";
+import { TimelineStage } from "./TimelineStage.js";
 
 /**
  * PremiumProductFilm: a 16:9 product-launch film. Product-led, elegant, no
  * overshoot. One hero action at a time. Frame 0 shows intentional content.
+ * When the plan carries an editor timeline, the full timeline is composited
+ * instead; legacy scene/caption plans render exactly as before.
  */
 export const PremiumProductFilm: React.FC<{ plan: EditPlan }> = ({ plan }) => {
   const { width } = useVideoConfig();
   const { brand } = plan;
+  if (plan.timeline) return <TimelineStage plan={plan} />;
 
   return (
     <AbsoluteFill style={{ backgroundColor: brand.paper }}>

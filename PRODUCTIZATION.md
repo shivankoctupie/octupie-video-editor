@@ -74,10 +74,29 @@ Dowd integrates the engine as a rendering and QA backend behind its own planner 
 - Regenerate the committed JSON Schema whenever the Zod source changes (`npm run schema:gen`); CI fails if the committed file drifts.
 - Presets are data. Adding or tuning a preset is a data change with a test that its starter plan still validates.
 
+## The local product server
+
+The repository now also ships the wrapper as a self-contained, local-first product under `src/server/`, with a React 19 + Vite timeline editor (source in `src/client/`, built into `public/`). It is additive: the pure engine and the offline agent are unchanged and still run with no server, and the EditPlan schema gains only an optional `timeline` field, so every existing plan validates unchanged.
+
+- A real browser timeline editor, not a form dashboard: a media bin (upload by picker or drag/drop, with video poster thumbnails, image previews, and audio waveforms decoded via the Web Audio API), a preview synchronized to the timeline playhead, an inspector, and a multi-track timeline (video, overlays, captions, audio) built on the MIT `@xzdarcy/react-timeline-editor` engine. It supports drag-to-move, trim handles, split at the playhead, ripple delete, duplicate, add/reorder/mute/lock tracks, snapping, zoom, undo/redo, and keyboard shortcuts. The editor state is a single pure reducer; the library is a controlled view over it, so every edit operation is unit-tested. Timeline state maps losslessly to the validated EditPlan (`timeline` field) plus a renderable scene/caption projection, with draft autosave and explicit immutable versions; a reload reproduces the timeline exactly. Covered by reducer and round-trip unit tests and a Playwright interaction flow (`tests/e2e/editor.spec.ts`).
+- Authenticated multi-user REST API over Node's standard library, no web framework and no CDN. Bearer tokens come only from the environment or an explicit config; the registry stores only the SHA-256 of each token and compares digests in constant time.
+- Default-deny RBAC (viewer, editor, approver, publisher, admin) enforced at the router before any handler runs, and tenant/project isolation enforced at the SQL layer on every read and write.
+- A transactional SQLite repository (`node:sqlite`) with immutable versions, decisions, and receipts, a concurrency-safe FIFO job claim inside a write transaction, and unique idempotency constraints for jobs and receipts. Rendering runs off the request path in a separate worker process (`npm run worker`) over the shared database.
+- Local content-addressed storage keyed by SHA-256, with a configured-but-unverified S3-compatible contract adapter that refuses IO until an operator injects a real client (it never claims a remote provider is verified).
+- Local deterministic generation (SVG proof card, labelled silent WAV) and grant-gated web and official Google Drive materialization, both with SSRF and DNS-rebinding defenses, byte/type/time caps, required reusable-rights metadata, and provenance sidecars.
+- One optional publishing adapter, an HTTPS webhook that is off by default and enabled only with an operator endpoint and host allowlist.
+
+The local product gates are enumerated in `PRODUCT_ACCEPTANCE.json` and each is executable-verified by `tests/product-acceptance.test.ts` and `tests/browser-smoke.test.ts`. See `SECURITY.md` for the trust boundary and `QUICKSTART.md` to run it.
+
 ## What is intentionally excluded
 
 - No bundled model keys. The deterministic engine and offline agent provider
-  remain zero-key; authenticated providers are optional adapters.
-- No job queue, database, auth, or web server.
-- No bundled media, fonts as binaries, or paid asset packs.
-- No cloud storage client. The engine reads and writes the local filesystem only.
+  remain zero-key; authenticated providers are optional adapters, configured by
+  env only, and never reported as verified without real evidence.
+- No bundled media, fonts as binaries, or paid asset packs. The browser app uses
+  a system font stack (Geist when locally installed) so it stays fully offline.
+- No cloud storage credentials or client. The S3-compatible adapter is a config
+  contract; it stays unavailable until an operator injects their own client.
+- No external publishing destination is contacted by default. The webhook adapter
+  is disabled unless configured, and the external parity providers in
+  `ACCEPTANCE_MANIFEST.json` remain unverified until backed by real evidence.

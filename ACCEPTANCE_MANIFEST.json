@@ -1,6 +1,6 @@
 {
   "format": "octupie-parity-acceptance/v1",
-  "note": "Every future end-to-end gate for the eight parity capabilities. All gates are pending by design. A gate flips to passed ONLY when its executable end-to-end check actually passes against real output. Nothing here may be marked green while the backing capability is unimplemented.",
+  "note": "Every future end-to-end gate for the eight parity capabilities that depend on a REAL external provider (semantic video understanding, transcription, diarization, and rendered-draft multimodal critique against real media). All gates here are pending by design. A gate flips to passed ONLY when its executable end-to-end check actually passes against real output. Nothing here may be marked green while the backing external provider is unverified. The LOCAL, offline product capabilities (the authenticated review/publishing server, local deterministic generation, grant-gated materialization, and the browser editor) are tracked and executable-verified separately in PRODUCT_ACCEPTANCE.json; they are intentionally NOT listed here so this parity manifest cannot be read as claiming external-provider evidence it does not have.",
   "gates": [
     {
       "id": "gate:semantic-video-understanding:segments",
