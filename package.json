@@ -51,7 +51,8 @@
     "start": "node dist/cli.js serve",
     "worker": "tsx src/cli.ts worker",
     "sfx:fetch": "tsx scripts/fetch-sfx.ts",
-    "dash:sweep": "node scripts/dash-sweep.mjs"
+    "dash:sweep": "node scripts/dash-sweep.mjs",
+    "local": "bash scripts/start-local.sh"
   },
   "dependencies": {
     "@remotion/bundler": "^4.0.0",

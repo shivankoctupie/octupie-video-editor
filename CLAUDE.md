@@ -22,6 +22,7 @@ npm run dash:sweep                 # fails on any em or en dash in committed tex
 npm run e2e                        # Playwright specs in tests/e2e (not run by vitest)
 npm run demo                       # synthetic render + QA of the exact master
 npm run cli -- <command>           # CLI via tsx (doctor, init, validate, render, qa, serve, worker, agent ...)
+npm run local                      # one-command local editor (Mac/Linux): deps, build, server + worker, token in output/local/
 npm run dev                        # build client, then serve editor + REST API on 127.0.0.1:8722
 npm run worker                     # render/QA job worker; needs the same OVE_SERVER_DB file as the server
 ```
