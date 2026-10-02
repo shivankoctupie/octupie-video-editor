@@ -24,6 +24,8 @@ The demo writes a playable MP4 with audio, plus a QA report bound to the master'
 
 ## Product server and browser editor
 
+On a Mac, `npm run local` sets up and starts the whole editor in one step (see `QUICKSTART.md`).
+
 The engine also ships as a self-contained, local-first product: an authenticated multi-user REST server and a real React timeline editor (React 19 + Vite, source in `src/client/`, built into `public/`) for editing, review, and publishing. It loads nothing from a CDN. See `QUICKSTART.md` for a full walkthrough; the short version is:
 
 ```bash

@@ -2,6 +2,18 @@
 
 This walks you through running the browser editor, review, and publishing product on your own machine. It is local-first: with no configuration it runs offline with an in-memory database, publishing disabled, and no network adapters. Everything that reaches beyond that boundary is opt-in through environment variables.
 
+## Fastest path: one command on a Mac
+
+```bash
+git clone https://github.com/shivankoctupie/octupie-video-editor.git
+cd octupie-video-editor
+npm run local
+```
+
+`npm run local` (the script is `scripts/start-local.sh`) installs Node 22 and FFmpeg with Homebrew if they are missing, installs dependencies, builds the editor, starts the server and the render worker on one shared database, and opens http://127.0.0.1:8722. It prints a login token (and copies it to the clipboard); the token is generated once and kept in `output/local/token`. Projects, uploads, and renders are stored under `output/local/` and survive restarts. Ctrl+C stops everything. It also works on Linux with Node 22.5+ and FFmpeg already installed. The first render downloads a headless browser for Remotion, so it needs internet access once.
+
+The manual steps below do the same thing by hand and explain every setting.
+
 ## 1. Prerequisites
 
 - Node.js 22.5.0 or newer (the server store uses the built-in `node:sqlite` module, added in 22.5.0; `npm run doctor` checks this).
